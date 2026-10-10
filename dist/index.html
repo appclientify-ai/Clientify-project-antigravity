@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en" class="font-sans">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Clientify | Practice Intelligence Operating System</title>
+    <meta name="google-site-verification" content="_oGXDk9jRHqrlh4V7ev3hVuFEg9skQAZs4FaAedTP6g" />
+    <meta name="description" content="Master your practice with Clientify. The high-performance vault for professional tax consultants." />
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Quicksand:wght@500;700;800&family=Roboto+Condensed:wght@400;700;900&family=Playfair+Display:wght@600;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+              mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+            },
+            colors: {
+              primary: 'var(--app-primary, #4f46e5)',
+              secondary: 'var(--app-primary-hover, #6366f1)',
+              accent: '#f59e0b',
+              surface: '#ffffff',
+              glass: 'rgba(255, 255, 255, 0.75)',
+            },
+            boxShadow: {
+              'glass-silk': '0 8px 32px 0 rgba(15, 23, 42, 0.06)',
+              'glass-float': '0 20px 40px -15px rgba(15, 23, 42, 0.08), 0 0 1px 1px rgba(255, 255, 255, 0.8) inset',
+              'soft-float': '0 12px 30px -6px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.03)',
+              'soft-elevate': '0 20px 45px -10px rgba(79, 70, 229, 0.12), 0 6px 16px -3px rgba(15, 23, 42, 0.04)',
+            },
+            animation: {
+              'pulse-priority': 'pulse-priority 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'float': 'float 6s ease-in-out infinite',
+              'float-slow': 'float 8s ease-in-out infinite',
+              'float-reverse': 'float-reverse 7s ease-in-out infinite',
+              'pulse-glow': 'pulse-glow 2.5s ease-in-out infinite',
+            },
+            keyframes: {
+              'pulse-priority': {
+                '0%, 100%': { opacity: 1, transform: 'scale(1)' },
+                '50%': { opacity: .7, transform: 'scale(1.05)' },
+              },
+              'float': {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-8px)' },
+              },
+              'float-reverse': {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(8px)' },
+              },
+              'pulse-glow': {
+                '0%, 100%': { opacity: 0.6, filter: 'drop-shadow(0 0 12px rgba(99, 102, 241, 0.3))' },
+                '50%': { opacity: 0.9, filter: 'drop-shadow(0 0 20px rgba(99, 102, 241, 0.5))' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --sat: env(safe-area-inset-top, 0px);
+        --sab: env(safe-area-inset-bottom, 0px);
+        --sal: env(safe-area-inset-left, 0px);
+        --sar: env(safe-area-inset-right, 0px);
+        --ui-font-size: 16px;
+        --ui-font-size-num: 16;
+        --app-primary: #4f46e5;
+        --app-primary-hover: #4338ca;
+        --app-primary-light: #e0e7ff;
+        --app-primary-text: #4f46e5;
+        --app-primary-ring: rgba(79, 70, 229, 0.25);
+        --app-bg: #fcfdfe;
+        --app-text: #0f172a;
+        --app-card-bg: #ffffff;
+        --app-font-size: var(--ui-font-size, 16px);
+        --table-font-size: max(14px, var(--ui-font-size, 16px));
+        --table-header-font-size: max(14px, var(--ui-font-size, 16px));
+      }
+      .safe-area-pt { padding-top: max(env(safe-area-inset-top, 0px), 0px); }
+      .safe-area-pb { padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.75rem); }
+
+      /* Modern sleek scrollbars */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.35);
+        border-radius: 9999px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(148, 163, 184, 0.6);
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: rgba(100, 116, 139, 0.35);
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: rgba(100, 116, 139, 0.6);
+      }
+
+      html { 
+        font-size: var(--ui-font-size, 16px) !important; 
+        scroll-behavior: smooth; 
+        -webkit-overflow-scrolling: touch;
+      }
+      body, #root {
+        font-size: var(--ui-font-size, 16px) !important;
+        background-color: var(--app-bg, #fcfdfe);
+        color: var(--app-text, #0f172a);
+        -webkit-tap-highlight-color: transparent;
+        transition: background-color 0.2s ease, color 0.2s ease;
+      }
+      .text-xs { font-size: max(12px, calc(0.75rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-sm { font-size: max(13.5px, calc(0.875rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-base { font-size: max(14.5px, calc(1rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-lg { font-size: max(16px, calc(1.125rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-xl { font-size: max(18px, calc(1.25rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+
+      .text-\[8px\] { font-size: max(11px, calc(0.5rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-\[9px\] { font-size: max(11.5px, calc(0.5625rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-\[10px\] { font-size: max(12px, calc(0.625rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-\[11px\] { font-size: max(12.5px, calc(0.6875rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-\[12px\] { font-size: max(13px, calc(0.75rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-\[13px\] { font-size: max(13.5px, calc(0.8125rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-\[14px\] { font-size: max(14px, calc(0.875rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+      .text-\[15px\] { font-size: max(15px, calc(0.9375rem * (var(--ui-font-size-num, 16) / 16))) !important; }
+
+      /* Inside Table Font Size & Header Standards (min 14px and scales with Quick App Customizer) */
+      table th, .gst-portfolio-table th, .food-licenses-table th, .msme-registration-table th, .gst-registration-table th, .misc-work-table th, .invoices-table th {
+        font-size: max(14px, var(--app-font-size, 14px)) !important;
+      }
+      table td, .gst-portfolio-table td, .food-licenses-table td, .msme-registration-table td, .gst-registration-table td, .misc-work-table td, .invoices-table td {
+        font-size: max(14px, var(--app-font-size, 14px)) !important;
+      }
+      table td p, table td span, table td input, table td select, table td button {
+        font-size: max(14px, var(--app-font-size, 14px)) !important;
+      }
+      table td p.sub-text, table td span.sub-text, table td .sub-text {
+        font-size: max(12.5px, calc(max(14px, var(--app-font-size, 14px)) - 1.5px)) !important;
+      }
+
+      /* A4 Printable Sheet Exclusions - Preserve Compact Typography for Invoices & Receipts */
+      #invoice-a4-sheet table th, #printable-receipt table th, .a4-sheet-canvas table th {
+        font-size: inherit !important;
+      }
+      #invoice-a4-sheet table td, #printable-receipt table td, .a4-sheet-canvas table td,
+      #invoice-a4-sheet table td p, #printable-receipt table td p, .a4-sheet-canvas table td p,
+      #invoice-a4-sheet table td span, #printable-receipt table td span, .a4-sheet-canvas table td span {
+        font-size: inherit !important;
+      }
+      #invoice-a4-sheet .text-\[7px\], #printable-receipt .text-\[7px\] { font-size: 7px !important; }
+      #invoice-a4-sheet .text-\[7\.5px\], #printable-receipt .text-\[7\.5px\] { font-size: 7.5px !important; }
+      #invoice-a4-sheet .text-\[8px\], #printable-receipt .text-\[8px\] { font-size: 8px !important; }
+      #invoice-a4-sheet .text-\[8\.5px\], #printable-receipt .text-\[8\.5px\] { font-size: 8.5px !important; }
+      #invoice-a4-sheet .text-\[9px\], #printable-receipt .text-\[9px\] { font-size: 9px !important; }
+      #invoice-a4-sheet .text-\[9\.5px\], #printable-receipt .text-\[9\.5px\] { font-size: 9.5px !important; }
+      #invoice-a4-sheet .text-\[10px\], #printable-receipt .text-\[10px\] { font-size: 10px !important; }
+      #invoice-a4-sheet .text-\[10\.5px\], #printable-receipt .text-\[10\.5px\] { font-size: 10.5px !important; }
+      #invoice-a4-sheet .text-\[11px\], #printable-receipt .text-\[11px\] { font-size: 11px !important; }
+      #invoice-a4-sheet .text-\[12px\], #printable-receipt .text-\[12px\] { font-size: 12px !important; }
+      #invoice-a4-sheet .text-xs, #printable-receipt .text-xs { font-size: 12px !important; }
+
+      /* Outside table minimum font size protection for Sidebar, Header, Search, Badges & Controls */
+      aside h5, aside button, aside span,
+      header h2, header p, header button, header span,
+      .search-container, input[type="text"], input[type="search"] {
+        font-size: max(12px, var(--app-font-size, 12px));
+      }
+
+
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      
+      .glass-card {
+        background: rgba(255, 255, 255, 0.75);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(226, 232, 240, 0.85);
+        box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.06), 0 4px 12px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+      }
+      .glass-card:hover {
+        border-color: rgba(99, 102, 241, 0.35);
+        box-shadow: 0 20px 40px -12px rgba(99, 102, 241, 0.12), 0 6px 16px -2px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 1);
+      }
+
+      .glass-float-card {
+        background: rgba(255, 255, 255, 0.78);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        border: 1px solid rgba(226, 232, 240, 0.85);
+        box-shadow: 0 12px 32px -8px rgba(15, 23, 42, 0.07), 0 4px 12px -2px rgba(15, 23, 42, 0.03), inset 0 1px 1px rgba(255, 255, 255, 0.95);
+        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .glass-float-card:hover {
+        transform: translateY(-4px);
+        border-color: rgba(99, 102, 241, 0.4);
+        box-shadow: 0 22px 45px -12px rgba(99, 102, 241, 0.16), 0 6px 16px -2px rgba(15, 23, 42, 0.04), inset 0 1px 1px rgba(255, 255, 255, 1);
+      }
+
+      .metric-floating-card {
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(226, 232, 240, 0.85);
+        box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+        transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .metric-floating-card:hover {
+        transform: translateY(-3px);
+        border-color: rgba(99, 102, 241, 0.4);
+        box-shadow: 0 18px 38px -8px rgba(79, 70, 229, 0.14), inset 0 1px 0 rgba(255, 255, 255, 1);
+      }
+
+      /* Typography Font Styles Applicable Across Whole App */
+      body, html, body.app-font-sans, .app-font-sans { 
+        font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important; 
+        font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01', 'tnum';
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        letter-spacing: -0.011em;
+      }
+      body.app-font-serif, .app-font-serif { font-family: 'Playfair Display', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif !important; }
+      body.app-font-mono, .app-font-mono, .font-mono, code, pre, samp { 
+        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; 
+        letter-spacing: 0.035em !important;
+        font-variant-numeric: tabular-nums lining-nums;
+      }
+      body.app-font-rounded, .app-font-rounded { font-family: 'Quicksand', system-ui, "Segoe UI Rounded", -apple-system, sans-serif !important; }
+      body.app-font-condensed, .app-font-condensed { font-family: 'Roboto Condensed', "Arial Narrow", sans-serif-condensed, sans-serif !important; }
+      body.app-font-slab, .app-font-slab { font-family: 'Rockwell', 'Playfair Display', Georgia, serif !important; }
+
+      /* Dynamic Primary Color Overrides across components */
+      .bg-indigo-600, .bg-indigo-700 {
+        background-color: var(--app-primary) !important;
+      }
+      .hover\:bg-indigo-700:hover, .hover\:bg-indigo-600:hover {
+        background-color: var(--app-primary-hover) !important;
+      }
+      .bg-indigo-50 {
+        background-color: var(--app-primary-light) !important;
+      }
+      .text-indigo-600, .text-indigo-700 {
+        color: var(--app-primary-text) !important;
+      }
+      .border-indigo-600 {
+        border-color: var(--app-primary) !important;
+      }
+      .border-indigo-200 {
+        border-color: var(--app-primary-light) !important;
+      }
+      .ring-indigo-600 {
+        --tw-ring-color: var(--app-primary) !important;
+      }
+      .shadow-indigo-600\/20 {
+        box-shadow: 0 10px 25px -5px var(--app-primary-ring) !important;
+      }
+
+      /* Theme Mode Overrides */
+      html.theme-mode-parchment body {
+        background-color: #faf8f5 !important;
+        color: #1c1917 !important;
+      }
+      html.theme-mode-parchment .bg-white {
+        background-color: #f3efe6 !important;
+      }
+      html.theme-mode-parchment .bg-slate-50 {
+        background-color: #e8e2d5 !important;
+      }
+
+      html.theme-mode-dark body {
+        background-color: #090d16 !important;
+        color: #f1f5f9 !important;
+      }
+      html.theme-mode-dark .bg-white {
+        background-color: #111827 !important;
+        color: #f1f5f9 !important;
+      }
+      html.theme-mode-dark .bg-slate-50 {
+        background-color: #1f2937 !important;
+        color: #f8fafc !important;
+      }
+      html.theme-mode-dark .bg-slate-100 {
+        background-color: #374151 !important;
+      }
+      html.theme-mode-dark .text-slate-900 {
+        color: #f8fafc !important;
+      }
+      html.theme-mode-dark .text-slate-800 {
+        color: #f1f5f9 !important;
+      }
+      html.theme-mode-dark .text-slate-700 {
+        color: #e2e8f0 !important;
+      }
+      html.theme-mode-dark .border-slate-100,
+      html.theme-mode-dark .border-slate-200 {
+        border-color: #1e293b !important;
+      }
+
+      /* Neo 3D Mode */
+      html.theme-mode-neo body {
+        background-color: #e6ecf5 !important;
+        color: #1e293b !important;
+      }
+      html.theme-mode-neo .bg-white {
+        background-color: #e6ecf5 !important;
+        box-shadow: 6px 6px 14px #c2c9d6, -6px -6px 14px #ffffff !important;
+        border-radius: 1rem !important;
+        border: 1px solid rgba(255,255,255,0.6) !important;
+      }
+      html.theme-mode-neo .bg-slate-50 {
+        background-color: #dce3ee !important;
+      }
+
+      /* 3D Glass Mode */
+      html.theme-mode-glass body {
+        background: linear-gradient(135deg, #0b0f19 0%, #1e1b4b 50%, #2e103f 100%) fixed !important;
+        color: #f8fafc !important;
+      }
+      html.theme-mode-glass .bg-white {
+        background: rgba(255, 255, 255, 0.07) !important;
+        backdrop-filter: blur(18px) !important;
+        -webkit-backdrop-filter: blur(18px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        color: #f8fafc !important;
+        box-shadow: 0 12px 32px 0 rgba(0, 0, 0, 0.35) !important;
+      }
+      html.theme-mode-glass .bg-slate-50 {
+        background: rgba(255, 255, 255, 0.05) !important;
+        color: #f1f5f9 !important;
+      }
+      html.theme-mode-glass .text-slate-900,
+      html.theme-mode-glass .text-slate-800,
+      html.theme-mode-glass .text-slate-700 {
+        color: #f8fafc !important;
+      }
+      html.theme-mode-glass .border-slate-100,
+      html.theme-mode-glass .border-slate-200 {
+        border-color: rgba(255, 255, 255, 0.12) !important;
+      }
+      
+      /* Standardized Compact Mode Data Table Utilities - keeps user customizer font size with tight row spacing */
+      .compact-mode table th,
+      .compact-mode table td,
+      table.compact-mode th,
+      table.compact-mode td,
+      .compact-mode th,
+      .compact-mode td {
+        padding-top: 4px !important;
+        padding-bottom: 4px !important;
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+        font-size: var(--app-font-size, 0.875rem) !important;
+        line-height: 1.4 !important;
+      }
+      .compact-mode tr, table.compact-mode tr {
+        height: auto !important;
+        min-height: unset !important;
+      }
+      .compact-mode .py-3, .compact-mode .py-4, .compact-mode .py-3\.5, .compact-mode .py-2\.5 {
+        padding-top: 4px !important;
+        padding-bottom: 4px !important;
+      }
+      .compact-mode .p-4, .compact-mode .p-3 {
+        padding: 0.35rem !important;
+      }
+
+      /* Fix sticky table headers and sector header row offsets to prevent client name overlapping and layout conflicts */
+      .compact-mode .sticky.top-\[27px\] {
+        top: 21px !important;
+      }
+      :not(.compact-mode) .sticky.top-\[27px\],
+      table:not(.compact-mode) .sticky.top-\[27px\] {
+        top: 36px !important;
+      }
+
+      @keyframes spin-slow {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      .animate-spin-slow {
+        animation: spin-slow 10s linear infinite;
+      }
+      .animate-spin-slow:hover {
+        animation-duration: 3s;
+      }
+
+      .traffic-red { background-color: #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+      .traffic-amber { background-color: #f59e0b; box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
+      .traffic-green { background-color: #10b981; box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); }
+
+      /* GST, IT, Food License, GST Reg, MSME, Work Log & Invoices Tables - Dynamic Font Sizing Customizer support */
+      .gst-portfolio-table,
+      .it-portfolio-table,
+      .itr-returns-table,
+      .tax-audit-table,
+      .monthly-returns-table,
+      .quarterly-returns-table,
+      .composition-returns-table,
+      .gstr4-returns-table,
+      .gstr9-returns-table,
+      .food-licenses-table,
+      .gst-registration-table,
+      .msme-registration-table,
+      .misc-work-table,
+      .invoices-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        font-size: max(14px, var(--app-font-size, 14px)) !important;
+      }
+      .gst-portfolio-table th,
+      .it-portfolio-table th,
+      .itr-returns-table th,
+      .tax-audit-table th,
+      .monthly-returns-table th,
+      .quarterly-returns-table th,
+      .composition-returns-table th,
+      .gstr4-returns-table th,
+      .gstr9-returns-table th,
+      .food-licenses-table th,
+      .gst-registration-table th,
+      .msme-registration-table th,
+      .misc-work-table th,
+      .invoices-table th {
+        font-size: max(14px, var(--app-font-size, 14px)) !important;
+        font-weight: 700 !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+        padding-left: 6px !important;
+        padding-right: 6px !important;
+        line-height: 1.4 !important;
+      }
+      .gst-portfolio-table td,
+      .it-portfolio-table td,
+      .itr-returns-table td,
+      .tax-audit-table td,
+      .monthly-returns-table td,
+      .quarterly-returns-table td,
+      .composition-returns-table td,
+      .gstr4-returns-table td,
+      .gstr9-returns-table td,
+      .gst-registration-table td,
+      .msme-registration-table td,
+      .misc-work-table td,
+      .invoices-table td {
+        font-size: max(14px, var(--app-font-size, 14px)) !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+        padding-left: 6px !important;
+        padding-right: 6px !important;
+        line-height: 1.4 !important;
+      }
+      /* Food License rows with increased height for spacious detail visibility */
+      .food-licenses-table td {
+        font-size: max(14px, var(--app-font-size, 14px)) !important;
+        padding-top: 14px !important;
+        padding-bottom: 14px !important;
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+        line-height: 1.5 !important;
+        vertical-align: middle !important;
+      }
+      .food-licenses-table th {
+        padding-top: 10px !important;
+        padding-bottom: 10px !important;
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+      }
+      .gst-portfolio-table td p,
+      .gst-portfolio-table td span,
+      .gst-portfolio-table td div,
+      .it-portfolio-table td p,
+      .it-portfolio-table td span,
+      .it-portfolio-table td div,
+      .itr-returns-table td p,
+      .itr-returns-table td span,
+      .itr-returns-table td div,
+      .itr-returns-table td input,
+      .tax-audit-table td p,
+      .tax-audit-table td span,
+      .tax-audit-table td div,
+      .tax-audit-table td input,
+      .monthly-returns-table td p,
+      .monthly-returns-table td span,
+      .monthly-returns-table td div,
+      .monthly-returns-table td input,
+      .it-portfolio-table td input,
+      .quarterly-returns-table td p,
+      .quarterly-returns-table td span,
+      .quarterly-returns-table td div,
+      .quarterly-returns-table td input,
+      .composition-returns-table td p,
+      .composition-returns-table td span,
+      .composition-returns-table td div,
+      .composition-returns-table td input,
+      .gstr4-returns-table td p,
+      .gstr4-returns-table td span,
+      .gstr4-returns-table td div,
+      .gstr4-returns-table td input,
+      .gstr9-returns-table td p,
+      .gstr9-returns-table td span,
+      .gstr9-returns-table td div,
+      .gstr9-returns-table td input,
+      .food-licenses-table td p,
+      .food-licenses-table td span,
+      .food-licenses-table td div,
+      .food-licenses-table td input,
+      .food-licenses-table td select,
+      .food-licenses-table td button,
+      .gst-registration-table td p,
+      .gst-registration-table td span,
+      .gst-registration-table td div,
+      .gst-registration-table td input,
+      .gst-registration-table td select,
+      .gst-registration-table td button,
+      .msme-registration-table td p,
+      .msme-registration-table td span,
+      .msme-registration-table td div,
+      .msme-registration-table td input,
+      .msme-registration-table td select,
+      .msme-registration-table td button,
+      .misc-work-table td p,
+      .misc-work-table td span,
+      .misc-work-table td div,
+      .misc-work-table td input,
+      .misc-work-table td select,
+      .misc-work-table td button,
+      .invoices-table td p,
+      .invoices-table td span,
+      .invoices-table td div,
+      .invoices-table td input,
+      .invoices-table td select,
+      .invoices-table td button {
+        font-size: inherit !important;
+      }
+      /* Specifically, the Trade subtitle under IT Portfolio name should be slightly smaller for elegant hierarchy */
+      .it-portfolio-table td p.trade-subtitle,
+      .itr-returns-table td p.trade-subtitle,
+      .tax-audit-table td p.trade-subtitle {
+        font-size: 12px !important;
+        color: #4f46e5 !important; /* Elegant indigo-600 with good contrast */
+        font-weight: 500 !important;
+      }
+      /* Monthly & Quarterly returns legal name subtitle style and Father Name subtitle */
+      .itr-returns-table td p.father-subtitle {
+        font-size: 12px !important;
+        color: #64748b !important; /* text-slate-500 */
+        font-weight: 500 !important;
+      }
+      .monthly-returns-table td p.legal-subtitle,
+      .quarterly-returns-table td p.legal-subtitle,
+      .composition-returns-table td p.legal-subtitle,
+      .gstr4-returns-table td p.legal-subtitle,
+      .gstr9-returns-table td p.legal-subtitle,
+      .itr-returns-table td p.legal-subtitle,
+      .tax-audit-table td p.legal-subtitle,
+      .gst-registration-table td p.sub-text,
+      .food-licenses-table td p.sub-text,
+      .msme-registration-table td p.sub-text,
+      .misc-work-table td p.sub-text,
+      .invoices-table td p.sub-text {
+        font-size: calc(var(--app-font-size, 13px) - 1.5px) !important;
+        color: #64748b !important; /* text-slate-500 */
+        font-weight: 500 !important;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/main-ImVYoGoZ.js"></script>
+  </head>
+  <body class="app-font-sans">
+    <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW ref fail', err));
+        });
+      }
+    </script>
+  </body>
+</html>

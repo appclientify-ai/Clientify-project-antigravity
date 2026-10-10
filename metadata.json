@@ -1,0 +1,12 @@
+{
+  "name": "Clientify PWA",
+  "description": "Professional Client Management & Compliance Vault",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
