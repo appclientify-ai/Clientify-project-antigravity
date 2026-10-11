@@ -119,11 +119,11 @@ const Login: React.FC<LoginProps> = ({ onSwitch, onBackToHome }) => {
 
         {/* Card Header with Logo & Clear Titles */}
         <div className="text-center mb-6">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-bold shadow-md shadow-indigo-500/20 overflow-hidden relative border border-indigo-400/30 shrink-0">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-bold shadow-md shadow-indigo-500/20 overflow-hidden relative border border-indigo-400/30 shrink-0">
             <img 
               src="/icon.png" 
               alt="Clientify Logo" 
-              className="relative z-10 h-full w-full object-cover rounded-2xl" 
+              className="relative z-10 h-full w-full object-cover rounded-full" 
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 if (!target.dataset.triedIcon) {

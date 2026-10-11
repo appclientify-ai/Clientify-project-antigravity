@@ -76,11 +76,11 @@ const Loader: React.FC<LoaderProps> = ({
           </svg>
 
           {/* Central Logo Box with Clean Glass Shadow */}
-          <div className="relative flex h-20 w-20 md:h-24 md:w-24 items-center justify-center rounded-2xl bg-white dark:bg-slate-900 p-2 border border-slate-200/80 dark:border-slate-800 shadow-[0_16px_40px_rgba(79,70,229,0.2)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] overflow-hidden transition-transform duration-300 hover:scale-105">
+          <div className="relative flex h-20 w-20 md:h-24 md:w-24 items-center justify-center rounded-full bg-white dark:bg-slate-900 p-2 border border-slate-200/80 dark:border-slate-800 shadow-[0_16px_40px_rgba(79,70,229,0.2)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.5)] overflow-hidden transition-transform duration-300 hover:scale-105">
             <img 
               src="/icon.png" 
               alt="Clientify Logo" 
-              className="h-full w-full rounded-xl object-cover transition-opacity duration-500"
+              className="h-full w-full rounded-full object-cover transition-opacity duration-500"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 if (!target.dataset.triedIcon) {

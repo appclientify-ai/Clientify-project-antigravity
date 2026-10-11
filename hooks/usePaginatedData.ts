@@ -34,22 +34,38 @@ export function useUpdateInvoiceMutation() {
   return useMutation({
     mutationFn: (updatedInvoice: InvoiceRecord) => api.saveInvoice(updatedInvoice),
     onMutate: async (updatedInvoice: InvoiceRecord) => {
+      const targetId = updatedInvoice.id || (updatedInvoice as any)._id;
+      const isMatch = (inv: any) => inv && (inv.id === targetId || inv._id === targetId);
+
       await queryClient.cancelQueries({ queryKey: ['category_items', 'invoice'] });
-      const previousQueries = queryClient.getQueriesData({ queryKey: ['category_items', 'invoice'] });
+      await queryClient.cancelQueries({ queryKey: ['invoices'] });
+
+      const prevCategoryQueries = queryClient.getQueriesData({ queryKey: ['category_items', 'invoice'] });
+      const prevInvoicesQueries = queryClient.getQueriesData({ queryKey: ['invoices'] });
 
       queryClient.setQueriesData<PaginatedResult<InvoiceRecord>>({ queryKey: ['category_items', 'invoice'] }, (old) => {
         if (!old || !old.items) return old;
         return {
           ...old,
-          items: old.items.map((inv) => (inv.id === updatedInvoice.id ? { ...inv, ...updatedInvoice } : inv)),
+          items: old.items.map((inv) => (isMatch(inv) ? { ...inv, ...updatedInvoice } : inv)),
         };
       });
 
-      return { previousQueries };
+      queryClient.setQueriesData<InvoiceRecord[]>({ queryKey: ['invoices'] }, (old) => {
+        if (!old || !Array.isArray(old)) return old;
+        return old.map((inv) => (isMatch(inv) ? { ...inv, ...updatedInvoice } : inv));
+      });
+
+      return { prevCategoryQueries, prevInvoicesQueries };
     },
     onError: (_err, _updatedInvoice, context) => {
-      if (context?.previousQueries) {
-        context.previousQueries.forEach(([queryKey, queryData]) => {
+      if (context?.prevCategoryQueries) {
+        context.prevCategoryQueries.forEach(([queryKey, queryData]) => {
+          queryClient.setQueryData(queryKey, queryData);
+        });
+      }
+      if (context?.prevInvoicesQueries) {
+        context.prevInvoicesQueries.forEach(([queryKey, queryData]) => {
           queryClient.setQueryData(queryKey, queryData);
         });
       }
@@ -71,22 +87,35 @@ export function useDeleteInvoiceMutation() {
     mutationFn: (id: string) => api.deleteInvoice(id),
     onMutate: async (deletedId: string) => {
       await queryClient.cancelQueries({ queryKey: ['category_items', 'invoice'] });
+      await queryClient.cancelQueries({ queryKey: ['invoices'] });
+
       const previousQueries = queryClient.getQueriesData({ queryKey: ['category_items', 'invoice'] });
+      const prevInvoicesQueries = queryClient.getQueriesData({ queryKey: ['invoices'] });
 
       queryClient.setQueriesData<PaginatedResult<InvoiceRecord>>({ queryKey: ['category_items', 'invoice'] }, (old) => {
         if (!old || !old.items) return old;
         return {
           ...old,
-          items: old.items.filter((inv) => inv.id !== deletedId),
+          items: old.items.filter((inv) => inv.id !== deletedId && (inv as any)._id !== deletedId),
           total: Math.max(0, old.total - 1),
         };
       });
 
-      return { previousQueries };
+      queryClient.setQueriesData<InvoiceRecord[]>({ queryKey: ['invoices'] }, (old) => {
+        if (!old || !Array.isArray(old)) return old;
+        return old.filter((inv) => inv.id !== deletedId && (inv as any)._id !== deletedId);
+      });
+
+      return { previousQueries, prevInvoicesQueries };
     },
     onError: (_err, _deletedId, context) => {
       if (context?.previousQueries) {
         context.previousQueries.forEach(([queryKey, queryData]) => {
+          queryClient.setQueryData(queryKey, queryData);
+        });
+      }
+      if (context?.prevInvoicesQueries) {
+        context.prevInvoicesQueries.forEach(([queryKey, queryData]) => {
           queryClient.setQueryData(queryKey, queryData);
         });
       }
@@ -107,34 +136,50 @@ export function useSettleInvoiceMutation() {
   return useMutation({
     mutationFn: ({ id, paymentData }: { id: string; paymentData: any }) => api.migrateToPayment(id, paymentData),
     onMutate: async ({ id, paymentData }) => {
+      const isMatch = (inv: any) => inv && (inv.id === id || inv._id === id);
+
       await queryClient.cancelQueries({ queryKey: ['category_items', 'invoice'] });
-      const previousQueries = queryClient.getQueriesData({ queryKey: ['category_items', 'invoice'] });
+      await queryClient.cancelQueries({ queryKey: ['invoices'] });
+
+      const prevCategoryQueries = queryClient.getQueriesData({ queryKey: ['category_items', 'invoice'] });
+      const prevInvoicesQueries = queryClient.getQueriesData({ queryKey: ['invoices'] });
+
+      const updateInvoiceWithPayment = (inv: InvoiceRecord): InvoiceRecord => {
+        const newPaid = (inv.amountPaid || 0) + Number(paymentData.amount || 0);
+        const isFull = newPaid >= (inv.totalAmount || 0);
+        return {
+          ...inv,
+          amountPaid: newPaid,
+          balanceDue: Math.max(0, (inv.totalAmount || 0) - newPaid),
+          status: isFull ? 'Paid' : 'Partial',
+          paymentDate: paymentData.date,
+          paymentMode: paymentData.mode,
+        };
+      };
 
       queryClient.setQueriesData<PaginatedResult<InvoiceRecord>>({ queryKey: ['category_items', 'invoice'] }, (old) => {
         if (!old || !old.items) return old;
         return {
           ...old,
-          items: old.items.map((inv) => {
-            if (inv.id === id) {
-              const newPaid = (inv.amountPaid || 0) + Number(paymentData.amount || 0);
-              const isFull = newPaid >= inv.totalAmount;
-              return {
-                ...inv,
-                amountPaid: newPaid,
-                balanceDue: Math.max(0, inv.totalAmount - newPaid),
-                status: isFull ? 'Paid' : 'Partial',
-              };
-            }
-            return inv;
-          }),
+          items: old.items.map((inv) => (isMatch(inv) ? updateInvoiceWithPayment(inv) : inv)),
         };
       });
 
-      return { previousQueries };
+      queryClient.setQueriesData<InvoiceRecord[]>({ queryKey: ['invoices'] }, (old) => {
+        if (!old || !Array.isArray(old)) return old;
+        return old.map((inv) => (isMatch(inv) ? updateInvoiceWithPayment(inv) : inv));
+      });
+
+      return { prevCategoryQueries, prevInvoicesQueries };
     },
     onError: (_err, _vars, context) => {
-      if (context?.previousQueries) {
-        context.previousQueries.forEach(([queryKey, queryData]) => {
+      if (context?.prevCategoryQueries) {
+        context.prevCategoryQueries.forEach(([queryKey, queryData]) => {
+          queryClient.setQueryData(queryKey, queryData);
+        });
+      }
+      if (context?.prevInvoicesQueries) {
+        context.prevInvoicesQueries.forEach(([queryKey, queryData]) => {
           queryClient.setQueryData(queryKey, queryData);
         });
       }

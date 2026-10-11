@@ -853,11 +853,11 @@ const Home: React.FC<HomeProps> = ({ onGetStarted }) => {
           
           <div className="text-center md:text-left">
             <div className="flex items-center justify-center md:justify-start gap-2.5 mb-2">
-               <div className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-white font-bold overflow-hidden shadow-xs shrink-0">
+               <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white font-bold overflow-hidden shadow-xs shrink-0">
                  <img 
                    src="/icon.png" 
                    alt="Logo" 
-                   className="relative z-10 h-full w-full object-cover" 
+                   className="relative z-10 h-full w-full object-cover rounded-full" 
                    onError={(e) => {
                      const target = e.target as HTMLImageElement;
                      if (!target.dataset.triedIcon) {

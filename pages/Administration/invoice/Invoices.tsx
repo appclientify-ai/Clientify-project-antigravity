@@ -585,6 +585,16 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
     }
   }, [previewInvoice?.id]);
 
+  // Sync listener for database changes
+  useEffect(() => {
+    const syncHandler = () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['category_items', 'invoice'] });
+    };
+    window.addEventListener('clientify_db_change', syncHandler);
+    return () => window.removeEventListener('clientify_db_change', syncHandler);
+  }, [queryClient]);
+
   // Close filter dropdown on outside click
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -592,6 +602,10 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
         setIsFilterDropdownOpen(false);
       }
       if (activeStatusRowId) {
+        const target = e.target as HTMLElement | null;
+        if (target && target.closest('[data-status-menu]')) {
+          return;
+        }
         setActiveStatusRowId(null);
       }
     };
@@ -681,9 +695,105 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
     return list;
   }, [invoices, search, statusFilter]);
 
+  const handleStatusChange = async (inv: InvoiceRecord, newStatus: InvoiceRecord['status']) => {
+    if (!inv || inv.status === newStatus) return;
+
+    let updated: InvoiceRecord = {
+      ...inv,
+      status: newStatus,
+    };
+
+    if (newStatus === 'Paid') {
+      const fullAmt = inv.totalAmount || 0;
+      updated.amountPaid = fullAmt;
+      updated.balanceDue = 0;
+      if (!updated.paymentDate) {
+        updated.paymentDate = new Date().toISOString().split('T')[0];
+      }
+      if (!updated.paymentMode) {
+        updated.paymentMode = 'Online';
+      }
+    } else if (newStatus === 'Draft' || newStatus === 'Sent') {
+      const paid = inv.amountPaid || 0;
+      const total = inv.totalAmount || 0;
+      updated.balanceDue = Math.max(0, total - paid);
+    } else if (newStatus === 'Cancelled') {
+      updated.balanceDue = 0;
+    } else if (newStatus === 'Partial') {
+      const total = inv.totalAmount || 0;
+      const currentPaid = inv.amountPaid || 0;
+      if (currentPaid <= 0 || currentPaid >= total) {
+        const half = Math.round(total / 2);
+        updated.amountPaid = half;
+        updated.balanceDue = total - half;
+      } else {
+        updated.balanceDue = Math.max(0, total - currentPaid);
+      }
+    }
+
+    // 1. Immediately update local state
+    setInvoices(prev => prev.map(i => (i.id === inv.id || (i as any)._id === inv.id) ? updated : i));
+
+    // 2. Update preview invoice if open
+    if (previewInvoice && (previewInvoice.id === inv.id || (previewInvoice as any)._id === inv.id)) {
+      setPreviewInvoice(updated);
+    }
+
+    // 3. Persist mutation
+    try {
+      await updateInvoiceMutation.mutateAsync(updated);
+
+      if (newStatus === 'Paid' && (inv.totalAmount || 0) > 0) {
+        try {
+          await api.savePayment({
+            clientId: inv.clientId,
+            clientName: inv.clientName,
+            clientTradeName: inv.clientTradeName,
+            invoiceNo: inv.invoiceNo,
+            date: updated.paymentDate || new Date().toISOString().split('T')[0],
+            amount: inv.totalAmount || 0,
+            mode: (updated.paymentMode as any) || 'Online',
+          });
+          queryClient.invalidateQueries({ queryKey: ['payments'] });
+        } catch (e) {
+          console.warn('Could not auto-create payment record:', e);
+        }
+      }
+
+      toast.success(`Invoice status updated to ${newStatus}`);
+    } catch (err) {
+      console.error('Failed to update invoice status:', err);
+      toast.error('Failed to update status in vault');
+      // Rollback
+      setInvoices(prev => prev.map(i => (i.id === inv.id || (i as any)._id === inv.id) ? inv : i));
+    }
+  };
+
   const handleReceiveConfirm = async () => {
     if (!settlingInvoice || isSaving) return;
     setIsSaving(true);
+    const amt = Number(payAmount) || 0;
+    const currentPaid = settlingInvoice.amountPaid || 0;
+    const newPaid = currentPaid + amt;
+    const isFull = newPaid >= (settlingInvoice.totalAmount || 0);
+    const updatedStatus: InvoiceRecord['status'] = isFull ? 'Paid' : 'Partial';
+    const newBalanceDue = Math.max(0, (settlingInvoice.totalAmount || 0) - newPaid);
+
+    const updatedInv: InvoiceRecord = {
+      ...settlingInvoice,
+      amountPaid: newPaid,
+      balanceDue: newBalanceDue,
+      status: updatedStatus,
+      paymentDate: payDate,
+      paymentMode: payMode,
+    };
+
+    // Immediately update local state
+    setInvoices(prev => prev.map(i => (i.id === settlingInvoice.id || (i as any)._id === settlingInvoice.id) ? updatedInv : i));
+    if (previewInvoice && (previewInvoice.id === settlingInvoice.id || (previewInvoice as any)._id === settlingInvoice.id)) {
+      setPreviewInvoice(updatedInv);
+    }
+
     settleInvoiceMutation.mutate(
       {
         id: settlingInvoice.id,
@@ -691,7 +801,7 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
           date: payDate,
           mode: payMode,
           chequeNo: payMode === 'Cheque' ? chequeNo : undefined,
-          amount: Number(payAmount)
+          amount: amt
         }
       },
       {
@@ -1374,19 +1484,14 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
                     <select
                       value={inv.status}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === 'Paid' || val === 'Partial') {
-                          setSettlingInvoice(inv);
-                          setPayAmount((inv.totalAmount || 0) - (inv.amountPaid || 0));
-                        } else {
-                          const updated = { ...inv, status: val as any };
-                          updateInvoiceMutation.mutate(updated);
-                        }
+                        const val = e.target.value as InvoiceRecord['status'];
+                        handleStatusChange(inv, val);
                       }}
                       className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border outline-none cursor-pointer ${
                         inv.status === 'Sent' ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800' : 
                         inv.status === 'Partial' ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 
                         inv.status === 'Paid' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 
+                        inv.status === 'Cancelled' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800' : 
                         'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                       }`}
                     >
@@ -1524,9 +1629,10 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
                           <div className="text-[10px] text-amber-600 dark:text-amber-400 font-bold">Due: ₹{(inv.balanceDue || 0).toLocaleString()}</div>
                         )}
                       </td>
-                      <td className="px-2.5 py-2 text-center relative overflow-visible whitespace-nowrap">
+                      <td className="px-2.5 py-2 text-center relative overflow-visible whitespace-nowrap" data-status-menu="true">
                         <button
                           type="button"
+                          onMouseDown={(e) => e.stopPropagation()}
                           onClick={(e) => {
                             e.stopPropagation();
                             setActiveStatusRowId(activeStatusRowId === inv.id ? null : inv.id);
@@ -1542,8 +1648,9 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
                         </button>
                         {activeStatusRowId === inv.id && (
                           <div 
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
-                            className="absolute top-full mt-1 z-50 left-1/2 -translate-x-1/2 w-36 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1 animate-in fade-in zoom-in-95 duration-100 text-left flex flex-col gap-0.5 ring-1 ring-black/5"
+                            className="absolute top-full mt-1 z-50 left-1/2 -translate-x-1/2 w-44 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1.5 animate-in fade-in zoom-in-95 duration-100 text-left flex flex-col gap-0.5 ring-1 ring-black/5"
                           >
                             <div className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 mb-0.5">
                               Update Status
@@ -1552,17 +1659,12 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
                               <button
                                 key={st}
                                 type="button"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setActiveStatusRowId(null);
-                                  if (st === 'Paid' || st === 'Partial') {
-                                    setSettlingInvoice(inv);
-                                    setPayAmount((inv.totalAmount || 0) - (inv.amountPaid || 0));
-                                  } else {
-                                    const updated = { ...inv, status: st };
-                                    updateInvoiceMutation.mutate(updated);
-                                  }
+                                  handleStatusChange(inv, st);
                                 }}
-                                className={`w-full text-left px-2 py-1 text-xs font-semibold rounded-lg flex items-center justify-between transition-colors cursor-pointer ${
+                                className={`w-full text-left px-2 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-between transition-colors cursor-pointer ${
                                   inv.status === st
                                     ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold'
                                     : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
@@ -1575,6 +1677,21 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
                                 {inv.status === st && <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                               </button>
                             ))}
+                            <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveStatusRowId(null);
+                                  setSettlingInvoice(inv);
+                                  setPayAmount((inv.totalAmount || 0) - (inv.amountPaid || 0));
+                                }}
+                                className="w-full text-left px-2 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <span>💳</span>
+                                <span>Record Payment...</span>
+                              </button>
+                            </div>
                           </div>
                         )}
                       </td>

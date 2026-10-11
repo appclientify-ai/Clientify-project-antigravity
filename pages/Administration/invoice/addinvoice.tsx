@@ -246,11 +246,32 @@ const AddInvoice: React.FC<AddInvoiceProps> = ({ onBack, editingInvoice }) => {
         subTotal: totals.subTotal,
         totalTax: totals.totalTax,
         totalAmount: totals.grandTotal,
-        status: status || 'Sent'
+        status: status || 'Sent',
+        amountPaid: status === 'Paid' ? totals.grandTotal : (editingInvoice?.amountPaid || 0),
+        balanceDue: status === 'Paid' ? 0 : (status === 'Cancelled' ? 0 : Math.max(0, totals.grandTotal - (editingInvoice?.amountPaid || 0))),
+        paymentDate: status === 'Paid' ? (editingInvoice?.paymentDate || new Date().toISOString().split('T')[0]) : editingInvoice?.paymentDate,
+        paymentMode: editingInvoice?.paymentMode || 'Online'
       };
 
       const saved = await api.saveInvoice(record);
       api.invalidateCache();
+
+      if (status === 'Paid' && totals.grandTotal > 0) {
+        try {
+          await api.savePayment({
+            clientId: record.clientId,
+            clientName: record.clientName,
+            clientTradeName: record.clientTradeName,
+            invoiceNo: record.invoiceNo,
+            date: record.paymentDate || new Date().toISOString().split('T')[0],
+            amount: totals.grandTotal,
+            mode: (record.paymentMode as any) || 'Online'
+          });
+          queryClient.invalidateQueries({ queryKey: ['payments'] });
+        } catch (e) {
+          console.warn('Could not auto-create payment record:', e);
+        }
+      }
       
       // Invalidate and optimistically populate cache
       await queryClient.invalidateQueries({ queryKey: ['category_items', 'invoice'] });

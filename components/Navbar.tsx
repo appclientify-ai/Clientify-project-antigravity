@@ -41,11 +41,11 @@ const Navbar: React.FC<NavbarProps> = ({ onLoginClick, onHomeClick }) => {
         
         {/* Brand/Logo */}
         <button onClick={onHomeClick} className="flex items-center gap-3.5 sm:gap-4 group text-left cursor-pointer">
-          <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-bold overflow-hidden border border-indigo-400/30 dark:border-indigo-500/30 shadow-md shadow-indigo-500/20 shrink-0 transition-transform group-hover:scale-105">
+          <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-indigo-700 text-white font-bold overflow-hidden border border-indigo-400/30 dark:border-indigo-500/30 shadow-md shadow-indigo-500/20 shrink-0 transition-transform group-hover:scale-105">
             <img 
               src="/icon.png" 
               alt="Clientify Logo" 
-              className="relative z-10 h-full w-full object-cover rounded-2xl" 
+              className="relative z-10 h-full w-full object-cover rounded-full" 
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 if (!target.dataset.triedIcon) {

@@ -396,11 +396,11 @@ const Sidebar: React.FC<SidebarProps> = ({
           {!isCollapsed ? (
             <>
               <div className="flex items-center gap-3 min-w-0 animate-in fade-in duration-200">
-                <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 dark:bg-indigo-600 text-white font-bold overflow-hidden shadow-xs shrink-0">
+                <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 dark:bg-indigo-600 text-white font-bold overflow-hidden shadow-xs shrink-0">
                   <img 
                     src="/icon.png" 
                     alt="Clientify Logo" 
-                    className="relative z-10 h-full w-full object-cover rounded-lg" 
+                    className="relative z-10 h-full w-full object-cover rounded-full" 
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
                       if (!target.dataset.triedIcon) {
@@ -433,13 +433,13 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex flex-col items-center justify-center">
               <button
                 onClick={onToggle}
-                className="group relative flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 dark:bg-indigo-600 text-white font-bold overflow-hidden shadow-xs cursor-pointer"
+                className="group relative flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 dark:bg-indigo-600 text-white font-bold overflow-hidden shadow-xs cursor-pointer"
                 title="Click to expand sidebar"
               >
                 <img 
                   src="/icon.png" 
                   alt="Clientify Logo" 
-                  className="relative z-10 h-full w-full object-cover rounded-lg" 
+                  className="relative z-10 h-full w-full object-cover rounded-full" 
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
                     if (!target.dataset.triedIcon) {
