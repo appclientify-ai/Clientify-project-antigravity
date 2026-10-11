@@ -1,11 +1,11 @@
 [build]
-  command = "npm run build"
+  command = "([ -x node_modules/.bin/vite ] || npm ci --no-audit --no-fund) && npm run build"
   publish = "dist"
 
 [build.environment]
   PUPPETEER_SKIP_DOWNLOAD = "true"
   PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
 
 [[headers]]
   for = "/sitemap.xml"
