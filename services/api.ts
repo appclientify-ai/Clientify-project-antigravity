@@ -1078,45 +1078,62 @@ class ApiService {
     return `${prefix}/${fy}/${count.toString().padStart(2, '0')}`;
   }
 
-  async migrateToPayment(invoiceId: string, paymentData: { date: string; mode: string; chequeNo?: string; amount?: number }): Promise<void> {
+  async migrateToPayment(invoiceId: string, paymentData: { date: string; mode: string; chequeNo?: string; amount?: number; discount?: number; isFullSettlementWithDiscount?: boolean }): Promise<PaymentRecord | undefined> {
     const invs = await this.getInvoices();
-    const inv = invs.find(i => i.id === invoiceId);
+    const inv = invs.find(i => i.id === invoiceId || (i as any)._id === invoiceId);
     if (!inv) return;
 
-    const paidAmount = paymentData.amount || inv.totalAmount;
-    const currentPaid = inv.amountPaid || 0;
+    const currentPaid = Number(inv.amountPaid) || 0;
+    const totalAmount = Number(inv.totalAmount) || 0;
+    const currentDiscount = Number(inv.discount) || 0;
+    const remainingBefore = Math.max(0, totalAmount - currentPaid - currentDiscount);
+
+    const paidAmount = (paymentData.amount !== undefined && paymentData.amount !== null && !isNaN(Number(paymentData.amount)))
+      ? Number(paymentData.amount)
+      : remainingBefore;
+
+    const discountAmount = Number(paymentData.discount) || 0;
+    const totalDiscount = currentDiscount + discountAmount;
     const newPaid = currentPaid + paidAmount;
-    
+
     inv.amountPaid = newPaid;
-    inv.balanceDue = inv.totalAmount - newPaid;
-    
-    if (inv.balanceDue <= 0) {
+    inv.discount = totalDiscount;
+
+    if (paymentData.isFullSettlementWithDiscount || (newPaid + totalDiscount) >= totalAmount) {
       inv.status = 'Paid';
       inv.balanceDue = 0;
     } else {
       inv.status = 'Partial';
+      inv.balanceDue = Math.max(0, totalAmount - newPaid - totalDiscount);
     }
 
     inv.paymentDate = paymentData.date;
     inv.paymentMode = paymentData.mode;
     await this.saveInvoice(inv);
     
-    await this.savePayment({
+    const savedPayment = await this.savePayment({
       clientId: inv.clientId,
       clientName: inv.clientName,
       clientTradeName: inv.clientTradeName,
+      clientGstin: inv.clientGstin,
       invoiceNo: inv.invoiceNo,
+      invoiceDate: inv.date,
       date: paymentData.date,
       amount: paidAmount,
+      discount: discountAmount > 0 ? discountAmount : undefined,
       mode: paymentData.mode as any,
-      chequeNo: paymentData.chequeNo
+      chequeNo: paymentData.chequeNo,
+      referenceNo: paymentData.chequeNo,
+      originalItems: inv.items
     });
+    return savedPayment;
   }
 
   async saveInvoice(invoice: Partial<InvoiceRecord>): Promise<InvoiceRecord> {
     const payload = { name: 'invoice', data: invoice };
     const res = invoice.id ? await this.put(`/items/${invoice.id}`, payload) : await this.post('/items', payload);
     this.invalidateCache('invoice');
+    this.invalidateCache('payment');
     this.invalidateCache();
     const transformed = this.transformItem<InvoiceRecord>(res);
     if (typeof window !== 'undefined') {
@@ -1134,11 +1151,11 @@ class ApiService {
   async deleteInvoice(id: string): Promise<void> {
     try {
       const invoices = await this.getInvoices();
-      const invoice = invoices.find(i => i.id === id);
+      const invoice = invoices.find(i => i.id === id || (i as any)._id === id);
       if (invoice) {
         const payments = await this.getPayments();
         const paymentsToDelete = payments.filter(p => 
-          (p.invoiceNo && invoice.invoiceNo && p.invoiceNo.trim() === invoice.invoiceNo.trim()) ||
+          (p.invoiceNo && invoice.invoiceNo && p.invoiceNo.trim().toLowerCase() === invoice.invoiceNo.trim().toLowerCase()) ||
           (p.clientId && invoice.clientId && p.clientId === invoice.clientId && p.invoiceNo === invoice.invoiceNo)
         );
         for (const p of paymentsToDelete) {
@@ -1153,7 +1170,14 @@ class ApiService {
       console.error('Error during cascade delete invoice payments:', err);
     }
     await this.delete(`/items/${id}`);
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('clientify_db_change'));
+    this.invalidateCache('invoice');
+    this.invalidateCache('payment');
+    this.invalidateCache();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('clientify_db_change', {
+        detail: { type: 'delete', category: 'invoice', id }
+      }));
+    }
   }
 
   async purgeOrphanAndCancelledRecords(): Promise<{ purgedCount: number }> {
@@ -1176,8 +1200,13 @@ class ApiService {
         }
       }
 
-      if (purgedCount > 0 && typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('clientify_db_change'));
+      if (purgedCount > 0) {
+        this.invalidateCache('invoice');
+        this.invalidateCache('payment');
+        this.invalidateCache();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('clientify_db_change'));
+        }
       }
       return { purgedCount };
     } catch (err) {
@@ -1191,14 +1220,93 @@ class ApiService {
     return items.map((i: any) => this.transformItem<PaymentRecord>(i));
   }
 
-  async deletePayment(id: string) {
-    await this.delete(`/items/${id}`);
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('clientify_db_change'));
+  async deletePayment(id: string): Promise<void> {
+    try {
+      // 1. If synthetic ID from client ledger
+      if (id.startsWith('inv-part-')) {
+        const invoiceId = id.replace('inv-part-', '');
+        const invoices = await this.getInvoices();
+        const invoice = invoices.find(i => i.id === invoiceId || (i as any)._id === invoiceId);
+        if (invoice) {
+          const allPayments = await this.getPayments();
+          const realPaymentsForInv = allPayments.filter(p => 
+            p.invoiceNo && invoice.invoiceNo && p.invoiceNo.trim().toLowerCase() === invoice.invoiceNo.trim().toLowerCase()
+          );
+          const realTotalPaid = realPaymentsForInv.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          
+          invoice.amountPaid = realTotalPaid;
+          invoice.discount = 0;
+          invoice.balanceDue = Math.max(0, (invoice.totalAmount || 0) - realTotalPaid);
+          invoice.status = realTotalPaid >= (invoice.totalAmount || 0) ? 'Paid' : (realTotalPaid > 0 ? 'Partial' : 'Sent');
+          await this.saveInvoice(invoice);
+        }
+        return;
+      }
+
+      // 2. Real payment record
+      const payments = await this.getPayments();
+      const paymentToDelete = payments.find(p => p.id === id || (p as any)._id === id);
+      
+      await this.delete(`/items/${id}`);
+
+      // Update associated invoice if linked
+      if (paymentToDelete && paymentToDelete.invoiceNo) {
+        const invoices = await this.getInvoices();
+        const associatedInvoice = invoices.find(i => 
+          i.invoiceNo && i.invoiceNo.trim().toLowerCase() === paymentToDelete.invoiceNo!.trim().toLowerCase()
+        );
+        if (associatedInvoice) {
+          const remainingPayments = payments.filter(p => 
+            p.id !== id && (p as any)._id !== id && 
+            p.invoiceNo && p.invoiceNo.trim().toLowerCase() === paymentToDelete.invoiceNo!.trim().toLowerCase()
+          );
+          const totalPaid = remainingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          const remainingDiscounts = remainingPayments.reduce((sum, p) => sum + (Number(p.discount) || 0), 0);
+          const discount = remainingPayments.length > 0 
+            ? remainingDiscounts 
+            : Math.max(0, (Number(associatedInvoice.discount) || 0) - (Number(paymentToDelete.discount) || 0));
+          const balanceDue = Math.max(0, (associatedInvoice.totalAmount || 0) - totalPaid - discount);
+          const status: InvoiceRecord['status'] = balanceDue <= 0 
+            ? 'Paid' 
+            : (totalPaid > 0 ? 'Partial' : (discount > 0 ? 'Partial' : (associatedInvoice.status === 'Paid' || associatedInvoice.status === 'Partial' ? 'Sent' : associatedInvoice.status)));
+          
+          await this.saveInvoice({
+            ...associatedInvoice,
+            amountPaid: totalPaid,
+            discount: discount > 0 ? discount : undefined,
+            balanceDue,
+            status,
+            paymentDate: remainingPayments.length > 0 ? remainingPayments[remainingPayments.length - 1].date : undefined,
+            paymentMode: remainingPayments.length > 0 ? remainingPayments[remainingPayments.length - 1].mode : undefined
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Error deleting payment:', err);
+      await this.delete(`/items/${id}`);
+    } finally {
+      this.invalidateCache('payment');
+      this.invalidateCache('invoice');
+      this.invalidateCache();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('clientify_db_change', {
+          detail: { type: 'delete', category: 'payment', id }
+        }));
+      }
+    }
   }
+
   async savePayment(payment: Partial<PaymentRecord>): Promise<PaymentRecord> {
     const payload = { name: 'payment', data: payment };
     const res = payment.id ? await this.put(`/items/${payment.id}`, payload) : await this.post('/items', payload);
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('clientify_db_change'));
+    this.invalidateCache('payment');
+    this.invalidateCache('invoice');
+    this.invalidateCache();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('clientify_db_change', {
+        detail: { type: payment.id ? 'update' : 'insert', category: 'payment', id: payment.id || res._id }
+      }));
+    }
     return this.transformItem<PaymentRecord>(res);
   }
 

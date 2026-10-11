@@ -155,6 +155,7 @@ export interface InvoiceRecord {
   totalAmount: number;
   amountPaid?: number;
   balanceDue?: number;
+  discount?: number;
   status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled' | 'Partial';
   paymentMode?: string;
   paymentDate?: string;
@@ -198,6 +199,7 @@ export interface PaymentRecord {
   invoiceDate?: string;
   date: string;
   amount: number;
+  discount?: number;
   mode: 'Cash' | 'Bank Transfer' | 'Cheque' | 'UPI' | 'Online';
   referenceNo?: string;
   originalItems?: InvoiceLineItem[];

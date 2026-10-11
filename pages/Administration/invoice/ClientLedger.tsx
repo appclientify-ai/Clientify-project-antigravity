@@ -60,7 +60,8 @@ const normalizeInvoice = (raw: any): InvoiceRecord => {
   const id = raw._id || raw.id || data.id || data._id;
   const totalAmount = Number(data.totalAmount) || 0;
   const amountPaid = Number(data.amountPaid) || 0;
-  const balanceDue = data.balanceDue !== undefined ? Number(data.balanceDue) : Math.max(0, totalAmount - amountPaid);
+  const discount = Number(data.discount) || 0;
+  const balanceDue = data.balanceDue !== undefined ? Number(data.balanceDue) : Math.max(0, totalAmount - amountPaid - discount);
   return {
     ...data,
     id,
@@ -73,6 +74,7 @@ const normalizeInvoice = (raw: any): InvoiceRecord => {
     date: data.date || raw.date || '',
     totalAmount,
     amountPaid,
+    discount,
     balanceDue,
     status: data.status || raw.status || 'Sent',
     createdAt: raw.createdAt || data.createdAt,
@@ -85,6 +87,7 @@ const normalizePayment = (raw: any): PaymentRecord => {
   const data = (raw.data && typeof raw.data === 'object' && !raw.amount) ? raw.data : raw;
   const id = raw._id || raw.id || data.id || data._id;
   const amount = Number(data.amount) || 0;
+  const discount = Number(data.discount) || 0;
   return {
     ...data,
     id,
@@ -94,6 +97,7 @@ const normalizePayment = (raw: any): PaymentRecord => {
     clientTradeName: data.clientTradeName || raw.clientTradeName || '',
     invoiceNo: data.invoiceNo || raw.invoiceNo || '',
     amount,
+    discount,
     date: data.date || raw.date || '',
     createdAt: raw.createdAt || data.createdAt,
     updatedAt: raw.updatedAt || data.updatedAt,
@@ -265,20 +269,51 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
     });
     const groupedClients = Array.from(groupedClientsMap.values());
 
+    // Helper to synthesize payment records for invoices having amountPaid > sum of recorded payments
+    const getEffectiveClientPayments = (clientInvs: typeof validInvoices, basePayments: typeof validPayments) => {
+      const syntheticPayments: typeof validPayments = [];
+      clientInvs.forEach(inv => {
+        const invPaid = Number(inv.amountPaid) || 0;
+        if (invPaid > 0) {
+          const recordedForInv = basePayments.filter(p => p.invoiceNo && p.invoiceNo === inv.invoiceNo);
+          const recordedTotal = recordedForInv.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          if (invPaid > recordedTotal) {
+            const gap = invPaid - recordedTotal;
+            syntheticPayments.push({
+              id: `inv-part-${inv.id}`,
+              clientId: inv.clientId,
+              clientName: inv.clientName,
+              clientTradeName: inv.clientTradeName,
+              invoiceNo: inv.invoiceNo,
+              invoiceDate: inv.date,
+              date: inv.paymentDate || inv.date,
+              amount: gap,
+              mode: (inv.paymentMode as any) || 'Online',
+              chequeNo: inv.paymentMode ? `${inv.paymentMode} Payment` : 'Direct Payment'
+            });
+          }
+        }
+      });
+      return [...basePayments, ...syntheticPayments];
+    };
+
     // 1. Process regular clients
     const regularBalances = groupedClients.map(client => {
       const clientInvoices = validInvoices.filter(i => isItemClientMatch(client, i));
-      const clientPayments = validPayments.filter(p => isItemClientMatch(client, p));
+      const clientBasePayments = validPayments.filter(p => isItemClientMatch(client, p));
+      const clientPayments = getEffectiveClientPayments(clientInvoices, clientBasePayments);
       
       const totalInvoiced = clientInvoices.reduce((sum, i) => sum + getInvoiceActualDebit(i), 0);
       const totalPaid = clientPayments.reduce((sum, p) => sum + p.amount, 0);
+      const totalDiscount = clientInvoices.reduce((sum, i) => sum + (Number(i.discount) || 0), 0);
       
-      const balance = totalInvoiced - totalPaid; // positive = debit, negative = credit
+      const balance = totalInvoiced - totalPaid - totalDiscount; // positive = debit, negative = credit
       return { 
         client: client as Client, 
         balance, 
         totalInvoiced, 
         totalPaid, 
+        totalDiscount,
         hasActivity: clientInvoices.length > 0 || clientPayments.length > 0 
       };
     });
@@ -298,11 +333,13 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
 
     const manualBalances = Array.from(unmatchedNames).map(name => {
       const clientInvoices = unmatchedInvoices.filter(i => (i.clientName || '').trim().toLowerCase() === name.toLowerCase());
-      const clientPayments = unmatchedPayments.filter(p => (p.clientName || '').trim().toLowerCase() === name.toLowerCase());
+      const clientBasePayments = unmatchedPayments.filter(p => (p.clientName || '').trim().toLowerCase() === name.toLowerCase());
+      const clientPayments = getEffectiveClientPayments(clientInvoices, clientBasePayments);
 
       const totalInvoiced = clientInvoices.reduce((sum, i) => sum + getInvoiceActualDebit(i), 0);
       const totalPaid = clientPayments.reduce((sum, p) => sum + p.amount, 0);
-      const balance = totalInvoiced - totalPaid;
+      const totalDiscount = clientInvoices.reduce((sum, i) => sum + (Number(i.discount) || 0), 0);
+      const balance = totalInvoiced - totalPaid - totalDiscount;
 
       const pseudoClient: Client = {
         id: `manual-${encodeURIComponent(name)}`,
@@ -313,7 +350,7 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
         gstProfile: { gstin: clientInvoices[0]?.clientGstin || '' }
       } as any;
 
-      return { client: pseudoClient, balance, totalInvoiced, totalPaid, hasActivity: true };
+      return { client: pseudoClient, balance, totalInvoiced, totalPaid, totalDiscount, hasActivity: true };
     });
 
     return [...regularBalances, ...manualBalances]
@@ -369,10 +406,36 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
       return isItemClientMatch(selectedClient as any, i);
     });
 
-    const clientPayments = validPayments.filter(p => {
+    const clientBasePayments = validPayments.filter(p => {
       if (isManual) return (p.clientName || '').trim().toLowerCase() === selectedClient.legalName.trim().toLowerCase();
       return isItemClientMatch(selectedClient as any, p);
     });
+
+    const syntheticPayments: typeof validPayments = [];
+    clientInvoices.forEach(inv => {
+      const invPaid = Number(inv.amountPaid) || 0;
+      if (invPaid > 0) {
+        const recordedForInv = clientBasePayments.filter(p => p.invoiceNo && p.invoiceNo === inv.invoiceNo);
+        const recordedTotal = recordedForInv.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        if (invPaid > recordedTotal) {
+          const gap = invPaid - recordedTotal;
+          syntheticPayments.push({
+            id: `inv-part-${inv.id}`,
+            clientId: inv.clientId,
+            clientName: inv.clientName,
+            clientTradeName: inv.clientTradeName,
+            invoiceNo: inv.invoiceNo,
+            invoiceDate: inv.date,
+            date: inv.paymentDate || inv.date,
+            amount: gap,
+            mode: (inv.paymentMode as any) || 'Online',
+            chequeNo: inv.paymentMode ? `${inv.paymentMode} Payment` : 'Direct Payment'
+          });
+        }
+      }
+    });
+
+    const clientPayments = [...clientBasePayments, ...syntheticPayments];
 
     clientInvoices.forEach(inv => {
        entries.push({
@@ -383,6 +446,18 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
          debit: getInvoiceActualDebit(inv),
          credit: 0
        });
+
+       const discountAmt = Number(inv.discount) || 0;
+       if (discountAmt > 0) {
+         entries.push({
+           id: `disc-${inv.id}`,
+           date: inv.paymentDate || inv.date,
+           type: 'Credit Note',
+           ref: `Settlement Discount / Waiver (${inv.invoiceNo})`,
+           debit: 0,
+           credit: discountAmt
+         });
+       }
     });
     
     clientPayments.forEach(pay => {
@@ -455,10 +530,27 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
       } else if (entryToDelete.type === 'Payment') {
         await api.deletePayment(entryToDelete.id);
         toast.success('Payment entry deleted successfully');
+      } else if (entryToDelete.type === 'Credit Note' || entryToDelete.id.startsWith('disc-')) {
+        const invId = entryToDelete.id.replace('disc-', '');
+        const targetInv = validInvoices.find(i => i.id === invId || (i as any)._id === invId);
+        if (targetInv) {
+          const originalAmt = Number(targetInv.totalAmount) || 0;
+          const paidAmt = Number(targetInv.amountPaid) || 0;
+          const newBal = Math.max(0, originalAmt - paidAmt);
+          const newStatus = newBal <= 0 ? 'Paid' : (paidAmt > 0 ? 'Partial' : 'Sent');
+          await api.saveInvoice({
+            ...targetInv,
+            discount: 0,
+            balanceDue: newBal,
+            status: newStatus
+          });
+          toast.success('Settlement discount / waiver removed from invoice and ledger');
+        }
       }
       
       queryClient.invalidateQueries({ queryKey: ['invoices'] }); 
       queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['category_items'] });
       setEntryToDelete(null);
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('clientify_db_change'));
     } catch (err) {
@@ -903,7 +995,11 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
                             </td>
                             <td className="py-3 px-2">
                               <span className={`text-[8.5px] font-black px-1.5 py-0.5 rounded mr-1.5 uppercase tracking-wider ${
-                                entry.type === 'Invoice' ? 'bg-indigo-100 text-indigo-800' : 'bg-emerald-100 text-emerald-800'
+                                entry.type === 'Invoice' 
+                                  ? 'bg-indigo-100 text-indigo-800' 
+                                  : entry.type === 'Credit Note' 
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                                  : 'bg-emerald-100 text-emerald-800'
                               }`}>
                                 {entry.type}
                               </span>

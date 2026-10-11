@@ -145,12 +145,19 @@ export function useSettleInvoiceMutation() {
       const prevInvoicesQueries = queryClient.getQueriesData({ queryKey: ['invoices'] });
 
       const updateInvoiceWithPayment = (inv: InvoiceRecord): InvoiceRecord => {
-        const newPaid = (inv.amountPaid || 0) + Number(paymentData.amount || 0);
-        const isFull = newPaid >= (inv.totalAmount || 0);
+        const addedPaid = Number(paymentData.amount || 0);
+        const addedDiscount = Number(paymentData.discount || 0);
+        const newPaid = (inv.amountPaid || 0) + addedPaid;
+        const totalDiscount = (Number(inv.discount) || 0) + addedDiscount;
+        const totalAmount = Number(inv.totalAmount) || 0;
+        const isFull = Boolean(paymentData.isFullSettlementWithDiscount || (newPaid + totalDiscount) >= totalAmount);
+        const newBalance = isFull ? 0 : Math.max(0, totalAmount - newPaid - totalDiscount);
+
         return {
           ...inv,
           amountPaid: newPaid,
-          balanceDue: Math.max(0, (inv.totalAmount || 0) - newPaid),
+          discount: totalDiscount,
+          balanceDue: newBalance,
           status: isFull ? 'Paid' : 'Partial',
           paymentDate: paymentData.date,
           paymentMode: paymentData.mode,
