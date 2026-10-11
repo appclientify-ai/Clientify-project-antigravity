@@ -58,18 +58,48 @@ export const GSTCertificateModal: React.FC<GSTCertificateModalProps> = ({
     e.target.value = '';
   };
 
+  const base64ToBlob = (dataUrl: string): Blob => {
+    if (!dataUrl.startsWith('data:')) {
+      return new Blob([dataUrl], { type: 'application/pdf' });
+    }
+    const parts = dataUrl.split(';base64,');
+    const contentType = parts[0].replace('data:', '') || 'application/pdf';
+    const base64Data = parts[1] || parts[0];
+    const binaryString = window.atob(base64Data);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: contentType });
+  };
+
   const handleDownloadPDF = () => {
     if (!gst.gstCertificate) {
       toast.error('No GST Certificate uploaded yet.');
       return;
     }
-    const link = document.createElement('a');
-    link.href = gst.gstCertificate;
-    link.download = gst.gstCertificateName || `GST_Certificate_${gstin}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success('Downloaded uploaded GST Certificate PDF');
+    try {
+      const blob = base64ToBlob(gst.gstCertificate);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = gst.gstCertificateName || `GST_Certificate_${gstin}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast.success('Downloaded uploaded GST Certificate PDF');
+    } catch (e) {
+      // Fallback direct link
+      const link = document.createElement('a');
+      link.href = gst.gstCertificate;
+      link.download = gst.gstCertificateName || `GST_Certificate_${gstin}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Downloaded uploaded GST Certificate PDF');
+    }
   };
 
   const handleShareCertificate = async () => {
@@ -78,11 +108,21 @@ export const GSTCertificateModal: React.FC<GSTCertificateModalProps> = ({
       return;
     }
 
-    // Try Web Share API with File
-    if (navigator.share && typeof navigator.canShare === 'function') {
+    const cleanPhone = (client.mobile || '').replace(/\D/g, '');
+    const phoneParam = cleanPhone.length >= 10 ? (cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone) : '';
+    const shareMsg = `*FORM GST REG-06 REGISTRATION CERTIFICATE*\nEntity: ${tradeName}\nGSTIN: ${gstin}\n\n[GST Certificate PDF has been downloaded to device. Please attach to this chat.]`;
+    const whatsappUrl = phoneParam
+      ? `https://api.whatsapp.com/send?phone=${phoneParam}&text=${encodeURIComponent(shareMsg)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(shareMsg)}`;
+
+    // Download PDF directly for quick attachment
+    handleDownloadPDF();
+
+    // Check if on a mobile device that supports Web Share API with files
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobileDevice && navigator.share && typeof navigator.canShare === 'function') {
       try {
-        const res = await fetch(gst.gstCertificate);
-        const blob = await res.blob();
+        const blob = base64ToBlob(gst.gstCertificate);
         const fileName = gst.gstCertificateName || `GST_Certificate_${gstin}.pdf`;
         const file = new File([blob], fileName, { type: blob.type || 'application/pdf' });
         
@@ -97,54 +137,103 @@ export const GSTCertificateModal: React.FC<GSTCertificateModalProps> = ({
         }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
-        console.warn('Native share failed, downloading PDF and opening WhatsApp', err);
       }
     }
 
-    // Fallback: Download the PDF to the user's device and open WhatsApp
-    handleDownloadPDF();
-    const cleanPhone = (client.mobile || '').replace(/\D/g, '');
-    const phoneParam = cleanPhone.length >= 10 ? (cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone) : '';
-    const shareMsg = `*FORM GST REG-06 REGISTRATION CERTIFICATE*\nEntity: ${tradeName}\nGSTIN: ${gstin}\n\n[GST Certificate PDF has been downloaded to device. Please attach to this chat.]`;
-    const whatsappUrl = phoneParam
-      ? `https://api.whatsapp.com/send?phone=${phoneParam}&text=${encodeURIComponent(shareMsg)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(shareMsg)}`;
-
+    // Direct WhatsApp opening
     window.open(whatsappUrl, '_blank');
     toast.info('Certificate PDF downloaded! Attach it in WhatsApp chat.');
   };
 
   const handlePrint = () => {
-    if (!gst.gstCertificate) return;
-
-    if (isPdf) {
-      const printWindow = window.open(gst.gstCertificate, '_blank');
-      if (printWindow) {
-        printWindow.focus();
-      } else {
-        handleDownloadPDF();
-      }
+    if (!gst.gstCertificate) {
+      toast.error('No GST Certificate uploaded yet. Please upload the PDF or image first.');
       return;
     }
 
-    const printWindow = window.open('about:blank', '_blank', 'width=900,height=1000');
-    if (printWindow) {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>GST Certificate - ${tradeName}</title>
-          <style>
-            body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #fff; }
-            img { max-width: 100%; max-height: 100%; object-fit: contain; }
-          </style>
-        </head>
-        <body onload="window.print(); window.close();">
-          <img src="${gst.gstCertificate}" alt="GST Certificate" />
-        </body>
-        </html>
-      `);
-      printWindow.document.close();
+    try {
+      const blob = base64ToBlob(gst.gstCertificate);
+      const blobUrl = URL.createObjectURL(blob);
+
+      if (isPdf) {
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+          const win = window.open(blobUrl, '_blank');
+          if (!win) handleDownloadPDF();
+          return;
+        }
+
+        // Desktop: Use invisible iframe for clean print dialog invocation
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        iframe.src = blobUrl;
+        document.body.appendChild(iframe);
+
+        let printTriggered = false;
+        iframe.onload = () => {
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              printTriggered = true;
+            } catch (err) {
+              console.warn('Iframe print restricted, opening printable blob tab:', err);
+              const win = window.open(blobUrl, '_blank');
+              if (win) {
+                win.focus();
+                printTriggered = true;
+              }
+            }
+          }, 300);
+        };
+
+        // Fallback: If iframe print is not triggered within 1.5s, open the blob URL in a new tab
+        setTimeout(() => {
+          if (!printTriggered) {
+            const win = window.open(blobUrl, '_blank');
+            if (win) win.focus();
+          }
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+            URL.revokeObjectURL(blobUrl);
+          }, 30000);
+        }, 1500);
+
+        toast.info('Opening GST Certificate print dialog...');
+        return;
+      }
+
+      // For Image certificates:
+      const printWindow = window.open('about:blank', '_blank', 'width=900,height=1000');
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>GST Certificate - ${tradeName}</title>
+            <style>
+              @page { size: A4 portrait; margin: 8mm; }
+              body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #fff; }
+              img { max-width: 100%; max-height: 100%; object-fit: contain; }
+            </style>
+          </head>
+          <body>
+            <img src="${blobUrl}" alt="GST Certificate" onload="window.focus(); window.print();" />
+          </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } catch (e) {
+      console.error('Failed to print GST certificate:', e);
+      handleDownloadPDF();
     }
   };
 

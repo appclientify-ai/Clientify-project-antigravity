@@ -53,6 +53,97 @@ const numberToWords = (num: number): string => {
   return ('Rupees ' + result.trim() + ' Only').replace(/\s+/g, ' ');
 };
 
+// Safe record normalizers
+const normalizeInvoice = (raw: any): InvoiceRecord => {
+  if (!raw) return raw;
+  const data = (raw.data && typeof raw.data === 'object' && !raw.invoiceNo) ? raw.data : raw;
+  const id = raw._id || raw.id || data.id || data._id;
+  const totalAmount = Number(data.totalAmount) || 0;
+  const amountPaid = Number(data.amountPaid) || 0;
+  const balanceDue = data.balanceDue !== undefined ? Number(data.balanceDue) : Math.max(0, totalAmount - amountPaid);
+  return {
+    ...data,
+    id,
+    _id: id,
+    clientId: data.clientId || raw.clientId,
+    clientName: data.clientName || raw.clientName || '',
+    clientTradeName: data.clientTradeName || raw.clientTradeName || '',
+    clientGstin: data.clientGstin || raw.clientGstin || '',
+    invoiceNo: data.invoiceNo || raw.invoiceNo || '',
+    date: data.date || raw.date || '',
+    totalAmount,
+    amountPaid,
+    balanceDue,
+    status: data.status || raw.status || 'Sent',
+    createdAt: raw.createdAt || data.createdAt,
+    updatedAt: raw.updatedAt || data.updatedAt,
+  };
+};
+
+const normalizePayment = (raw: any): PaymentRecord => {
+  if (!raw) return raw;
+  const data = (raw.data && typeof raw.data === 'object' && !raw.amount) ? raw.data : raw;
+  const id = raw._id || raw.id || data.id || data._id;
+  const amount = Number(data.amount) || 0;
+  return {
+    ...data,
+    id,
+    _id: id,
+    clientId: data.clientId || raw.clientId,
+    clientName: data.clientName || raw.clientName || '',
+    clientTradeName: data.clientTradeName || raw.clientTradeName || '',
+    invoiceNo: data.invoiceNo || raw.invoiceNo || '',
+    amount,
+    date: data.date || raw.date || '',
+    createdAt: raw.createdAt || data.createdAt,
+    updatedAt: raw.updatedAt || data.updatedAt,
+  };
+};
+
+// Calculate actual debit for an invoice, excluding any legacy "Previous Balance" line items so past dues are not doubled
+const getInvoiceActualDebit = (inv: InvoiceRecord): number => {
+  if (!inv.items || inv.items.length === 0) return inv.totalAmount || 0;
+  const hasPreviousBalanceItem = inv.items.some(it => (it.description || '').toLowerCase().startsWith('previous balance'));
+  if (!hasPreviousBalanceItem) return inv.totalAmount || 0;
+  
+  const cleanItems = inv.items.filter(it => !(it.description || '').toLowerCase().startsWith('previous balance'));
+  const cleanSubTotal = cleanItems.reduce((acc, it) => {
+    const qty = inv.showQuantity !== false ? (it.quantity !== undefined ? it.quantity : 1) : 1;
+    return acc + ((it.rate || 0) * qty);
+  }, 0);
+  
+  const taxRatio = (inv.subTotal && inv.subTotal > 0 && inv.totalTax) ? (inv.totalTax / inv.subTotal) : 0;
+  return Math.round(cleanSubTotal + (cleanSubTotal * taxRatio));
+};
+
+const isItemClientMatch = (
+  client: Client & { _allIds?: string[], _allLegalNames?: string[], _allGstins?: string[] },
+  item: { clientId?: string; clientName?: string; clientTradeName?: string; clientGstin?: string }
+): boolean => {
+  if (!item) return false;
+  const itemClientId = (item.clientId || '').trim();
+  const allIds = client._allIds || (client.id ? [client.id] : []);
+  if (itemClientId && itemClientId !== 'misc' && allIds.includes(itemClientId)) {
+    return true;
+  }
+
+  const allLegalNames = client._allLegalNames || (client.legalName ? [client.legalName.trim().toLowerCase()] : []);
+  const allGstins = client._allGstins || (client.gstProfile?.gstin ? [client.gstProfile.gstin.trim().toLowerCase()] : []);
+  
+  const itemLegal = (item.clientName || '').trim().toLowerCase();
+  const itemTrade = (item.clientTradeName || '').trim().toLowerCase();
+  const itemGstin = (item.clientGstin || '').trim().toLowerCase();
+  const clientTrade = (client.tradeName || '').trim().toLowerCase();
+
+  if (itemLegal && allLegalNames.includes(itemLegal)) return true;
+  if (itemTrade && clientTrade && itemTrade === clientTrade) return true;
+  if (itemLegal && clientTrade && itemLegal === clientTrade) return true;
+  if (itemTrade && allLegalNames.includes(itemTrade)) return true;
+  if (itemGstin && allGstins.length > 0 && allGstins.includes(itemGstin)) return true;
+
+  return false;
+};
+
 const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => {
   const queryClient = useQueryClient();
   const { data: clients = [], isLoading: isClientsLoading } = useModuleData<Client[]>('clients');
@@ -79,6 +170,17 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
 
   const isLoading = isClientsLoading || isInvoicesLoading || isPaymentsLoading || isPurging;
 
+  // Real-time synchronization on DB changes
+  useEffect(() => {
+    const syncHandler = () => {
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+    };
+    window.addEventListener('clientify_db_change', syncHandler);
+    return () => window.removeEventListener('clientify_db_change', syncHandler);
+  }, [queryClient]);
+
   // Click outside listener for filter dropdown
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -96,20 +198,28 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
     setManualCarryForward('');
   }, [selectedClient]);
 
-  const validInvoices = useMemo(() => {
-    return invoices.filter(i => i.status !== 'Cancelled' && i.status !== 'Draft');
+  const normalizedInvoices = useMemo(() => {
+    return (invoices || []).filter(Boolean).map(normalizeInvoice);
   }, [invoices]);
+
+  const normalizedPayments = useMemo(() => {
+    return (payments || []).filter(Boolean).map(normalizePayment);
+  }, [payments]);
+
+  const validInvoices = useMemo(() => {
+    return normalizedInvoices.filter(i => i.status !== 'Cancelled' && i.status !== 'Draft');
+  }, [normalizedInvoices]);
 
   const activeInvoiceNos = useMemo(() => {
     return new Set(validInvoices.map(i => i.invoiceNo ? i.invoiceNo.trim() : ''));
   }, [validInvoices]);
 
   const validPayments = useMemo(() => {
-    return payments.filter(p => {
+    return normalizedPayments.filter(p => {
       if (!p.invoiceNo) return true;
       return activeInvoiceNos.has(p.invoiceNo.trim());
     });
-  }, [payments, activeInvoiceNos]);
+  }, [normalizedPayments, activeInvoiceNos]);
 
   const handlePurgeDatabase = async () => {
     if (window.confirm('Do you want to clean deleted/cancelled invoice data and orphaned payments from the database?')) {
@@ -129,65 +239,68 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
 
   const clientBalances = useMemo(() => {
     // 0. Group clients by tradeName (or legalName if no tradeName)
-    const groupedClientsMap = new Map<string, Client & { _allIds: string[], _allLegalNames: string[] }>();
+    const groupedClientsMap = new Map<string, Client & { _allIds: string[], _allLegalNames: string[], _allGstins: string[] }>();
     clients.forEach(c => {
-      const key = (c.tradeName || c.legalName).trim().toLowerCase();
+      if (!c) return;
+      const key = (c.tradeName || c.legalName || '').trim().toLowerCase();
+      if (!key) return;
+      const gstin = c.gstProfile?.gstin ? c.gstProfile.gstin.trim().toLowerCase() : '';
       if (!groupedClientsMap.has(key)) {
-        groupedClientsMap.set(key, { ...c, _allIds: [c.id], _allLegalNames: [c.legalName.trim().toLowerCase()] });
+        groupedClientsMap.set(key, { 
+          ...c, 
+          _allIds: [c.id], 
+          _allLegalNames: [c.legalName ? c.legalName.trim().toLowerCase() : key],
+          _allGstins: gstin ? [gstin] : []
+        });
       } else {
         const existing = groupedClientsMap.get(key)!;
-        existing._allIds.push(c.id);
-        existing._allLegalNames.push(c.legalName.trim().toLowerCase());
+        if (!existing._allIds.includes(c.id)) existing._allIds.push(c.id);
+        if (c.legalName && !existing._allLegalNames.includes(c.legalName.trim().toLowerCase())) {
+          existing._allLegalNames.push(c.legalName.trim().toLowerCase());
+        }
+        if (gstin && !existing._allGstins.includes(gstin)) {
+          existing._allGstins.push(gstin);
+        }
       }
     });
     const groupedClients = Array.from(groupedClientsMap.values());
 
     // 1. Process regular clients
     const regularBalances = groupedClients.map(client => {
-      const clientInvoices = validInvoices.filter(i => {
-        if (i.clientId && i.clientId !== 'misc') return client._allIds.includes(i.clientId);
-        return (i.clientName && client._allLegalNames.includes(i.clientName.trim().toLowerCase())) ||
-          (i.clientTradeName && client.tradeName && i.clientTradeName.trim().toLowerCase() === client.tradeName.trim().toLowerCase());
-      });
-      const clientPayments = validPayments.filter(p => {
-        if (p.clientId && p.clientId !== 'misc') return client._allIds.includes(p.clientId);
-        return (p.clientName && client._allLegalNames.includes(p.clientName.trim().toLowerCase())) ||
-          (p.clientTradeName && client.tradeName && p.clientTradeName.trim().toLowerCase() === client.tradeName.trim().toLowerCase());
-      });
+      const clientInvoices = validInvoices.filter(i => isItemClientMatch(client, i));
+      const clientPayments = validPayments.filter(p => isItemClientMatch(client, p));
       
-      const totalInvoiced = clientInvoices.reduce((sum, i) => sum + i.totalAmount, 0);
+      const totalInvoiced = clientInvoices.reduce((sum, i) => sum + getInvoiceActualDebit(i), 0);
       const totalPaid = clientPayments.reduce((sum, p) => sum + p.amount, 0);
       
       const balance = totalInvoiced - totalPaid; // positive = debit, negative = credit
-      return { client: client as Client, balance, hasActivity: clientInvoices.length > 0 || clientPayments.length > 0 };
+      return { 
+        client: client as Client, 
+        balance, 
+        totalInvoiced, 
+        totalPaid, 
+        hasActivity: clientInvoices.length > 0 || clientPayments.length > 0 
+      };
     });
 
     // 2. Identify and group unmatched invoices/payments (manual or misc clients)
     const unmatchedInvoices = validInvoices.filter(i => 
-      !groupedClients.some(c => {
-        if (i.clientId && i.clientId !== 'misc') return c._allIds.includes(i.clientId);
-        return (i.clientName && c._allLegalNames.includes(i.clientName.trim().toLowerCase())) ||
-          (i.clientTradeName && c.tradeName && i.clientTradeName.trim().toLowerCase() === c.tradeName.trim().toLowerCase());
-      })
+      !groupedClients.some(c => isItemClientMatch(c, i))
     );
 
     const unmatchedPayments = validPayments.filter(p => 
-      !groupedClients.some(c => {
-        if (p.clientId && p.clientId !== 'misc') return c._allIds.includes(p.clientId);
-        return (p.clientName && c._allLegalNames.includes(p.clientName.trim().toLowerCase())) ||
-          (p.clientTradeName && c.tradeName && p.clientTradeName.trim().toLowerCase() === c.tradeName.trim().toLowerCase());
-      })
+      !groupedClients.some(c => isItemClientMatch(c, p))
     );
 
     const unmatchedNames = new Set<string>();
-    unmatchedInvoices.forEach(i => i.clientName && unmatchedNames.add(i.clientName));
-    unmatchedPayments.forEach(p => p.clientName && unmatchedNames.add(p.clientName));
+    unmatchedInvoices.forEach(i => i.clientName && unmatchedNames.add(i.clientName.trim()));
+    unmatchedPayments.forEach(p => p.clientName && unmatchedNames.add(p.clientName.trim()));
 
     const manualBalances = Array.from(unmatchedNames).map(name => {
-      const clientInvoices = unmatchedInvoices.filter(i => i.clientName === name);
-      const clientPayments = unmatchedPayments.filter(p => p.clientName === name);
+      const clientInvoices = unmatchedInvoices.filter(i => (i.clientName || '').trim().toLowerCase() === name.toLowerCase());
+      const clientPayments = unmatchedPayments.filter(p => (p.clientName || '').trim().toLowerCase() === name.toLowerCase());
 
-      const totalInvoiced = clientInvoices.reduce((sum, i) => sum + i.totalAmount, 0);
+      const totalInvoiced = clientInvoices.reduce((sum, i) => sum + getInvoiceActualDebit(i), 0);
       const totalPaid = clientPayments.reduce((sum, p) => sum + p.amount, 0);
       const balance = totalInvoiced - totalPaid;
 
@@ -200,7 +313,7 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
         gstProfile: { gstin: clientInvoices[0]?.clientGstin || '' }
       } as any;
 
-      return { client: pseudoClient, balance, hasActivity: true };
+      return { client: pseudoClient, balance, totalInvoiced, totalPaid, hasActivity: true };
     });
 
     return [...regularBalances, ...manualBalances]
@@ -252,21 +365,13 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
     const isManual = selectedClient.id.startsWith('manual-');
     
     const clientInvoices = validInvoices.filter(i => {
-      if (isManual) return i.clientName === selectedClient.legalName;
-      const allIds = (selectedClient as any)._allIds || [selectedClient.id];
-      const allLegalNames = (selectedClient as any)._allLegalNames || [selectedClient.legalName.trim().toLowerCase()];
-      if (i.clientId && i.clientId !== 'misc') return allIds.includes(i.clientId);
-      return (i.clientName && allLegalNames.includes(i.clientName.trim().toLowerCase())) ||
-        (i.clientTradeName && selectedClient.tradeName && i.clientTradeName.trim().toLowerCase() === selectedClient.tradeName.trim().toLowerCase());
+      if (isManual) return (i.clientName || '').trim().toLowerCase() === selectedClient.legalName.trim().toLowerCase();
+      return isItemClientMatch(selectedClient as any, i);
     });
 
     const clientPayments = validPayments.filter(p => {
-      if (isManual) return p.clientName === selectedClient.legalName;
-      const allIds = (selectedClient as any)._allIds || [selectedClient.id];
-      const allLegalNames = (selectedClient as any)._allLegalNames || [selectedClient.legalName.trim().toLowerCase()];
-      if (p.clientId && p.clientId !== 'misc') return allIds.includes(p.clientId);
-      return (p.clientName && allLegalNames.includes(p.clientName.trim().toLowerCase())) ||
-        (p.clientTradeName && selectedClient.tradeName && p.clientTradeName.trim().toLowerCase() === selectedClient.tradeName.trim().toLowerCase());
+      if (isManual) return (p.clientName || '').trim().toLowerCase() === selectedClient.legalName.trim().toLowerCase();
+      return isItemClientMatch(selectedClient as any, p);
     });
 
     clientInvoices.forEach(inv => {
@@ -275,7 +380,7 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
          date: inv.date,
          type: 'Invoice',
          ref: inv.invoiceNo,
-         debit: inv.totalAmount,
+         debit: getInvoiceActualDebit(inv),
          credit: 0
        });
     });
@@ -292,7 +397,7 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
     });
     
     return entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [selectedClient, invoices, payments, validInvoices, validPayments]);
+  }, [selectedClient, validInvoices, validPayments]);
 
   const { filteredLedgerEntries, openingBalanceRow, finalClosingDr, finalClosingCr, finalClosingBal } = useMemo(() => {
     const manualCarryNum = parseFloat(manualCarryForward) || 0;
@@ -1267,24 +1372,8 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
             <div className="col-span-full bg-white dark:bg-slate-900 p-12 rounded-2xl border border-slate-200 dark:border-slate-800 text-center text-slate-400 font-bold text-xs uppercase tracking-widest">
               No clients found with ledger activity.
             </div>
-          ) : filteredBalances.map(({ client, balance }) => {
+          ) : filteredBalances.map(({ client, balance, totalInvoiced, totalPaid }) => {
             const isManual = client.id.startsWith('manual-');
-            const clientInvoices = invoices.filter(i => {
-              if (i.status === 'Cancelled') return false;
-              if (isManual) return i.clientName === client.legalName;
-              return i.clientId === client.id || 
-                (i.clientName && i.clientName.trim().toLowerCase() === client.legalName.trim().toLowerCase()) ||
-                (i.clientTradeName && client.tradeName && i.clientTradeName.trim().toLowerCase() === client.tradeName.trim().toLowerCase());
-            });
-            const clientPayments = payments.filter(p => {
-              if (isManual) return p.clientName === client.legalName;
-              return p.clientId === client.id || 
-                (p.clientName && p.clientName.trim().toLowerCase() === client.legalName.trim().toLowerCase()) ||
-                (p.clientTradeName && client.tradeName && p.clientTradeName.trim().toLowerCase() === client.tradeName.trim().toLowerCase());
-            });
-            
-            const totalInvoiced = clientInvoices.reduce((sum, i) => sum + i.totalAmount, 0);
-            const totalPaid = clientPayments.reduce((sum, p) => sum + p.amount, 0);
 
             return (
               <div key={client.id} className="bg-white/80 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-all flex flex-col justify-between space-y-3">
@@ -1390,24 +1479,8 @@ const ClientLedger: React.FC<ClientLedgerProps> = ({ onBack, onViewChange }) => 
                          No clients found with ledger activity.
                       </td>
                    </tr>
-                ) : filteredBalances.map(({ client, balance }) => {
+                ) : filteredBalances.map(({ client, balance, totalInvoiced, totalPaid }) => {
                    const isManual = client.id.startsWith('manual-');
-                   const clientInvoices = invoices.filter(i => {
-                     if (i.status === 'Cancelled') return false;
-                     if (isManual) return i.clientName === client.legalName;
-                     return i.clientId === client.id || 
-                       (i.clientName && i.clientName.trim().toLowerCase() === client.legalName.trim().toLowerCase()) ||
-                       (i.clientTradeName && client.tradeName && i.clientTradeName.trim().toLowerCase() === client.tradeName.trim().toLowerCase());
-                   });
-                   const clientPayments = payments.filter(p => {
-                     if (isManual) return p.clientName === client.legalName;
-                     return p.clientId === client.id || 
-                       (p.clientName && p.clientName.trim().toLowerCase() === client.legalName.trim().toLowerCase()) ||
-                       (p.clientTradeName && client.tradeName && p.clientTradeName.trim().toLowerCase() === client.tradeName.trim().toLowerCase());
-                   });
-                   
-                   const totalInvoiced = clientInvoices.reduce((sum, i) => sum + i.totalAmount, 0);
-                   const totalPaid = clientPayments.reduce((sum, p) => sum + p.amount, 0);
                    
                    return (
                     <tr key={client.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60 transition-all group text-[var(--table-font-size)] border-b border-slate-100 dark:border-slate-800/60">

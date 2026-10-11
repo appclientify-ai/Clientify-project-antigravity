@@ -95,6 +95,42 @@ const AppContent: React.FC = () => {
             return { ...oldData, items: updated };
           }
         );
+
+        if (category === 'invoice') {
+          queryClient.setQueriesData<any>(
+            { queryKey: ['invoices'] },
+            (old: any) => {
+              if (!Array.isArray(old)) return old;
+              if (payload.type === 'delete') {
+                return old.filter((item: any) => (item._id || item.id) !== itemId);
+              } else if (payload.type === 'insert') {
+                const exists = old.some((item: any) => (item._id || item.id) === itemId);
+                return exists ? old : [normalizedItem, ...old];
+              } else {
+                return old.map((item: any) =>
+                  (item._id || item.id) === itemId ? { ...item, ...normalizedItem } : item
+                );
+              }
+            }
+          );
+        } else if (category === 'payment') {
+          queryClient.setQueriesData<any>(
+            { queryKey: ['payments'] },
+            (old: any) => {
+              if (!Array.isArray(old)) return old;
+              if (payload.type === 'delete') {
+                return old.filter((item: any) => (item._id || item.id) !== itemId);
+              } else if (payload.type === 'insert') {
+                const exists = old.some((item: any) => (item._id || item.id) === itemId);
+                return exists ? old : [normalizedItem, ...old];
+              } else {
+                return old.map((item: any) =>
+                  (item._id || item.id) === itemId ? { ...item, ...normalizedItem } : item
+                );
+              }
+            }
+          );
+        }
       }
 
       if (debounceTimer) {
@@ -102,6 +138,8 @@ const AppContent: React.FC = () => {
       }
       debounceTimer = setTimeout(() => {
         queryClient.invalidateQueries({ refetchType: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['invoices'] });
+        queryClient.invalidateQueries({ queryKey: ['payments'] });
       }, 150);
     };
     window.addEventListener('clientify_db_change', handleDbChange);

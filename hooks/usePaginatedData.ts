@@ -57,6 +57,8 @@ export function useUpdateInvoiceMutation() {
     onSettled: () => {
       api.invalidateCache();
       queryClient.invalidateQueries({ queryKey: ['category_items', 'invoice'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
     },
   });
 }
@@ -92,6 +94,8 @@ export function useDeleteInvoiceMutation() {
     onSettled: () => {
       api.invalidateCache();
       queryClient.invalidateQueries({ queryKey: ['category_items', 'invoice'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
     },
   });
 }
@@ -139,6 +143,8 @@ export function useSettleInvoiceMutation() {
       api.invalidateCache();
       queryClient.invalidateQueries({ queryKey: ['category_items', 'invoice'] });
       queryClient.invalidateQueries({ queryKey: ['category_items', 'payment'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
     },
   });
 }

@@ -121,13 +121,14 @@ Kindly arrange the remittance at your earliest convenience. Thank you for your b
 interface InvoiceA4SheetProps {
   invoice: InvoiceRecord;
   settings?: InvoiceSettings;
+  isCompact?: boolean;
   previousDues?: InvoiceRecord[];
   totalPreviousDues?: number;
-  getOutstandingBalance: (inv: InvoiceRecord) => number;
+  getOutstandingBalance?: (inv: InvoiceRecord) => number;
 }
 
 const InvoiceA4Sheet = React.forwardRef<HTMLDivElement, InvoiceA4SheetProps>(
-  ({ invoice, settings, previousDues = [], totalPreviousDues = 0, getOutstandingBalance }, ref) => {
+  ({ invoice, settings, isCompact = false, previousDues = [], totalPreviousDues = 0, getOutstandingBalance }, ref) => {
     const hasFirmGstin = Boolean(
       settings?.firmGstin && 
       settings.firmGstin.trim() !== '' && 
@@ -320,7 +321,9 @@ const InvoiceA4Sheet = React.forwardRef<HTMLDivElement, InvoiceA4SheetProps>(
                   </tr>
                 ))}
                 {previousDues.map((prevInv) => {
-                  const outstanding = getOutstandingBalance(prevInv);
+                  const outstanding = getOutstandingBalance 
+                    ? getOutstandingBalance(prevInv) 
+                    : Math.max(0, (prevInv.balanceDue !== undefined ? prevInv.balanceDue : (prevInv.totalAmount || 0) - (prevInv.amountPaid || 0)));
                   if (outstanding <= 0) return null;
                   return (
                     <tr key={`prev-${prevInv.id}`} className="bg-rose-50/40 border-t border-rose-200">
@@ -612,12 +615,13 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
     return invoices.filter(i => {
       if (!i) return false;
       const isClientMatch = (i.clientId && targetInv.clientId && i.clientId === targetInv.clientId && i.clientId !== 'misc') ||
-                            (i.clientName && targetInv.clientName && (i.clientName || '').trim().toLowerCase() === (targetInv.clientName || '').trim().toLowerCase());
+                            (i.clientName && targetInv.clientName && (i.clientName || '').trim().toLowerCase() === (targetInv.clientName || '').trim().toLowerCase()) ||
+                            (i.clientTradeName && targetInv.clientTradeName && (i.clientTradeName || '').trim().toLowerCase() === (targetInv.clientTradeName || '').trim().toLowerCase());
       
       const isPrior = new Date(i.date || 0).getTime() < new Date(targetInv.date || 0).getTime() || 
                       (new Date(i.date || 0).getTime() === new Date(targetInv.date || 0).getTime() && (i.invoiceNo || '') < (targetInv.invoiceNo || ''));
 
-      return isClientMatch && i.id !== targetInv.id && i.status !== 'Paid' && isPrior;
+      return isClientMatch && i.id !== targetInv.id && i.status !== 'Paid' && i.status !== 'Cancelled' && i.status !== 'Draft' && isPrior;
     });
   };
 
@@ -719,9 +723,58 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
     toast.success('Invoices synced with vault');
   };
 
+  const resolveClientPhone = (inv: InvoiceRecord): string => {
+    let phone = (inv.miscMobile || '').replace(/\D/g, '');
+    if (!phone && inv.clientId && inv.clientId !== 'misc') {
+      const matchedClient = clients.find(c => c.id === inv.clientId);
+      if (matchedClient?.mobile) {
+        phone = matchedClient.mobile.replace(/\D/g, '');
+      }
+    }
+    if (!phone) {
+      const tradeNameLower = (inv.clientTradeName || '').trim().toLowerCase();
+      const clientNameLower = (inv.clientName || '').trim().toLowerCase();
+      const gstinLower = (inv.clientGstin || '').trim().toLowerCase();
+
+      const matchedClient = clients.find(c => {
+        const cTrade = (c.tradeName || '').trim().toLowerCase();
+        const cLegal = (c.legalName || '').trim().toLowerCase();
+        const cGstin = (c.gstProfile?.gstin || '').trim().toLowerCase();
+        return (
+          (tradeNameLower && cTrade && cTrade === tradeNameLower) ||
+          (clientNameLower && cLegal && cLegal === clientNameLower) ||
+          (tradeNameLower && cLegal && cLegal === tradeNameLower) ||
+          (gstinLower && cGstin && cGstin === gstinLower)
+        );
+      });
+      if (matchedClient?.mobile) {
+        phone = matchedClient.mobile.replace(/\D/g, '');
+      }
+    }
+    if (phone.length === 10) {
+      phone = '91' + phone;
+    }
+    return phone;
+  };
+
   const handleWhatsApp = (inv: InvoiceRecord) => {
-    if (sharingInvoice) return;
-    toast.info(`Generating single-page A4 PDF invoice for WhatsApp...`);
+    const prevDues = getTotalPreviousDuesFor(inv);
+    const messageText = buildInvoiceWhatsAppMessage(inv, settings, prevDues);
+    const phone = resolveClientPhone(inv);
+
+    const waUrl = phone 
+      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(messageText)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(messageText)}`;
+
+    // Open WhatsApp directly during click gesture so browser popup blockers NEVER block it!
+    const win = window.open(waUrl, '_blank');
+    if (!win) {
+      window.location.href = waUrl;
+    }
+
+    toast.success('Opening WhatsApp with invoice details!');
+
+    // Also trigger single-page A4 PDF download in background
     setSharingInvoice(inv);
   };
 
@@ -729,23 +782,19 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
     if (!sharingInvoice) return;
 
     let isCancelled = false;
-    const generateAndShare = async () => {
+    const generateAndDownloadPDF = async () => {
       try {
         const inv = sharingInvoice;
         // Wait for offscreen DOM & QR to render
-        await new Promise(r => setTimeout(r, 120));
+        await new Promise(r => setTimeout(r, 150));
         if (isCancelled) return;
 
         const sheetEl = shareSheetRef.current;
-        if (!sheetEl) {
-          throw new Error('Invoice sheet element not found');
-        }
+        if (!sheetEl) return;
 
         const isBillOfSupply = inv.invoiceType === 'Bill of Supply';
         const docType = isBillOfSupply ? 'Bill_of_Supply' : 'Tax_Invoice';
         const filename = `${docType}_${(inv.invoiceNo || 'INV').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-        const prevDues = getTotalPreviousDuesFor(inv);
-        const messageText = buildInvoiceWhatsAppMessage(inv, settings, prevDues);
 
         // Offscreen container clone for single-page A4 PDF export
         const clone = sheetEl.cloneNode(true) as HTMLElement;
@@ -794,68 +843,31 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
           };
 
           const pdfBlob: Blob = await html2pdf().from(clone).set(opt).output('blob');
-          const file = new File([pdfBlob], filename, { type: 'application/pdf' });
-          const nav = navigator as any;
-
-          // Resolve client phone
-          let phone = (inv.miscMobile || '').replace(/\D/g, '');
-          if (!phone && inv.clientId) {
-            const matchedClient = clients.find(c => c.id === inv.clientId);
-            if (matchedClient?.mobile) {
-              phone = matchedClient.mobile.replace(/\D/g, '');
-            }
-          }
-          if (phone.length === 10) {
-            phone = '91' + phone;
-          }
-
-          if (nav.canShare && nav.canShare({ files: [file] })) {
-            try {
-              await nav.share({
-                title: `${isBillOfSupply ? 'Bill of Supply' : 'Tax Invoice'} - ${inv.invoiceNo}`,
-                text: messageText,
-                files: [file]
-              });
-              toast.success('Invoice PDF shared successfully via WhatsApp!');
-              setSharingInvoice(null);
-              return;
-            } catch (shareErr) {
-              console.log('Native file share dismissed or unsupported, falling back to download + web chat', shareErr);
-            }
-          }
-
-          // Auto-download single page A4 PDF invoice
           const url = window.URL.createObjectURL(pdfBlob);
           const a = document.createElement('a');
           a.href = url;
           a.download = filename;
           a.click();
           window.URL.revokeObjectURL(url);
-
-          toast.success('A4 PDF Invoice downloaded! Opening WhatsApp...');
-          const waUrl = phone 
-            ? `https://wa.me/${phone}?text=${encodeURIComponent(messageText)}`
-            : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
-          window.open(waUrl, '_blank');
+          toast.success('A4 PDF Invoice downloaded! You can attach it in WhatsApp.');
         } finally {
           if (document.body.contains(container)) {
             document.body.removeChild(container);
           }
         }
       } catch (err) {
-        console.error('Failed to generate WhatsApp invoice PDF:', err);
-        toast.error('Failed to generate invoice PDF for WhatsApp');
+        console.warn('PDF generation in background failed or dismissed:', err);
       } finally {
         setSharingInvoice(null);
       }
     };
 
-    generateAndShare();
+    generateAndDownloadPDF();
 
     return () => {
       isCancelled = true;
     };
-  }, [sharingInvoice, clients, settings]);
+  }, [sharingInvoice]);
 
   const handleSwitchInvoiceType = async (type: 'Tax Invoice' | 'Bill of Supply') => {
     if (!previewInvoice) return;
@@ -1972,6 +1984,7 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
                       isCompact={isCompact}
                       previousDues={previousDues}
                       totalPreviousDues={totalPreviousDues}
+                      getOutstandingBalance={getOutstandingBalance}
                     />
                   </div>
               </div>
@@ -1989,6 +2002,7 @@ const Invoices: React.FC<InvoicesProps> = ({ onViewChange }) => {
             isCompact={true}
             previousDues={getPreviousDuesFor(sharingInvoice)}
             totalPreviousDues={getTotalPreviousDuesFor(sharingInvoice)}
+            getOutstandingBalance={getOutstandingBalance}
           />
         </div>
       )}
