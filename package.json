@@ -35,7 +35,6 @@
     "sonner": "^2.0.7"
   },
   "devDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.63.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
