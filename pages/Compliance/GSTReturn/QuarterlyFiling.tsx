@@ -304,29 +304,74 @@ const QuarterlyFiling: React.FC = () => {
 
   const stats = useMemo(() => {
     const total = baseClients.length;
-    if (isAllQuartersMode) return { total, r1: 0, r3b: 0, r3bChallan: 0, pending: 0 };
-    const r1 = baseClients.filter(c => getStatus(c.id).r1).length;
-    const r3bFiled = baseClients.filter(c => getStatusLabel(getStatus(c.id).r3b) === 'Filed').length;
-    const r3bChallan = baseClients.filter(c => getStatusLabel(getStatus(c.id).r3b) === 'Challan').length;
-    const pending = baseClients.filter(c => !getStatus(c.id).r1 || getStatusLabel(getStatus(c.id).r3b) === 'Pending').length;
+    let r1 = 0;
+    let r3bFiled = 0;
+    let r3bChallan = 0;
+    let pending = 0;
+
+    baseClients.forEach(c => {
+      if (isAllQuartersMode) {
+        const isR1AllFiled = QUARTER_CONFIGS.every(q => q.months.every(m => getStatus(c.id, `${selectedYear}_${m.name}`).r1));
+        const hasChallan = QUARTER_CONFIGS.some(q => getStatusLabel(getStatus(c.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Challan');
+        const is3bAllFiled = QUARTER_CONFIGS.every(q => getStatusLabel(getStatus(c.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Filed');
+        const anyR1Pending = QUARTER_CONFIGS.some(q => q.months.some(m => !getStatus(c.id, `${selectedYear}_${m.name}`).r1));
+        const any3bPending = QUARTER_CONFIGS.some(q => getStatusLabel(getStatus(c.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Pending');
+
+        if (isR1AllFiled) r1++;
+        if (hasChallan) r3bChallan++;
+        if (is3bAllFiled) r3bFiled++;
+        if (anyR1Pending || any3bPending) pending++;
+      } else {
+        const r3bPeriod = `${selectedYear}_${activeQuarterConfig.r3bMonth}`;
+        const label3B = getStatusLabel(getStatus(c.id, r3bPeriod).r3b);
+        const isR1AllFiled = activeQuarterConfig.months.every(m => getStatus(c.id, `${selectedYear}_${m.name}`).r1);
+        const isR1AnyPending = activeQuarterConfig.months.some(m => !getStatus(c.id, `${selectedYear}_${m.name}`).r1);
+
+        if (isR1AllFiled) r1++;
+        if (label3B === 'Challan') r3bChallan++;
+        if (label3B === 'Filed') r3bFiled++;
+        if (isR1AnyPending || label3B === 'Pending') pending++;
+      }
+    });
+
     return { total, r1, r3b: r3bFiled, r3bChallan, pending };
-  }, [baseClients, getStatus, isAllQuartersMode]);
+  }, [baseClients, getStatus, isAllQuartersMode, selectedYear, activeQuarterConfig]);
 
   const filteredClients = useMemo(() => {
     if (quickFilter === 'All') return baseClients;
-    if (quickFilter === 'R1Filed') return baseClients.filter(c => getStatus(c.id).r1);
-    if (quickFilter === '3BFiled') return baseClients.filter(c => getStatusLabel(getStatus(c.id).r3b) === 'Filed');
-    if (quickFilter === '3BChallan') return baseClients.filter(c => getStatusLabel(getStatus(c.id).r3b) === 'Challan');
-    if (quickFilter === 'Pending') return baseClients.filter(c => !getStatus(c.id).r1 || getStatusLabel(getStatus(c.id).r3b) === 'Pending');
-    return baseClients;
-  }, [baseClients, quickFilter, getStatus]);
+
+    return baseClients.filter(c => {
+      if (isAllQuartersMode) {
+        if (quickFilter === 'R1Filed') {
+          return QUARTER_CONFIGS.every(q => q.months.every(m => getStatus(c.id, `${selectedYear}_${m.name}`).r1));
+        }
+        if (quickFilter === '3BFiled') {
+          return QUARTER_CONFIGS.every(q => getStatusLabel(getStatus(c.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Filed');
+        }
+        if (quickFilter === '3BChallan') {
+          return QUARTER_CONFIGS.some(q => getStatusLabel(getStatus(c.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Challan');
+        }
+        if (quickFilter === 'Pending') {
+          const anyR1Pending = QUARTER_CONFIGS.some(q => q.months.some(m => !getStatus(c.id, `${selectedYear}_${m.name}`).r1));
+          const any3bPending = QUARTER_CONFIGS.some(q => getStatusLabel(getStatus(c.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Pending');
+          return anyR1Pending || any3bPending;
+        }
+      } else {
+        const r3bPeriod = `${selectedYear}_${activeQuarterConfig.r3bMonth}`;
+        const label3B = getStatusLabel(getStatus(c.id, r3bPeriod).r3b);
+        const isR1AllFiled = activeQuarterConfig.months.every(m => getStatus(c.id, `${selectedYear}_${m.name}`).r1);
+        const isR1AnyPending = activeQuarterConfig.months.some(m => !getStatus(c.id, `${selectedYear}_${m.name}`).r1);
+
+        if (quickFilter === 'R1Filed') return isR1AllFiled;
+        if (quickFilter === '3BFiled') return label3B === 'Filed';
+        if (quickFilter === '3BChallan') return label3B === 'Challan';
+        if (quickFilter === 'Pending') return isR1AnyPending || label3B === 'Pending';
+      }
+      return true;
+    });
+  }, [baseClients, quickFilter, getStatus, isAllQuartersMode, selectedYear, activeQuarterConfig]);
 
   const filterOptions = useMemo(() => {
-    if (isAllQuartersMode) {
-      return [
-        { value: 'All', label: 'Total Clients', shortLabel: 'Total', count: stats.total, dot: 'bg-slate-400' }
-      ];
-    }
     return [
       { value: 'All', label: 'Total Clients', shortLabel: 'Total', count: stats.total, dot: 'bg-slate-400' },
       { value: 'R1Filed', label: 'IFF/R1 Filed', shortLabel: 'IFF/R1 Filed', count: stats.r1, dot: 'bg-emerald-500' },
@@ -334,7 +379,7 @@ const QuarterlyFiling: React.FC = () => {
       { value: '3BFiled', label: '3B Filed', shortLabel: '3B Filed', count: stats.r3b, dot: 'bg-emerald-500' },
       { value: 'Pending', label: 'Pending Filing', shortLabel: 'Pending', count: stats.pending, dot: 'bg-amber-500' },
     ];
-  }, [stats, isAllQuartersMode]);
+  }, [stats]);
 
   const currentFilterOption = useMemo(() => {
     return filterOptions.find(o => o.value === quickFilter) || filterOptions[0];
@@ -375,7 +420,7 @@ const QuarterlyFiling: React.FC = () => {
       finalMessage = `${selectedNote.trim()}\n\n${shareText}`;
     }
     const encodedText = encodeURIComponent(finalMessage);
-    window.open(`whatsapp://send?text=${encodedText}`, '_blank');
+    window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
     setIsShareModalOpen(false);
   };
 
@@ -428,8 +473,8 @@ const QuarterlyFiling: React.FC = () => {
         client.legalName || '---',
         client.mobile || '---',
         client.gstProfile?.gstin || '---',
-        getStatus(client.id).r1 ? 'Filed' : 'Pending',
-        isQuarterEnd ? getStatusLabel(getStatus(client.id).r3b) : 'N/A',
+        activeQuarterConfig.months.every(m => getStatus(client.id, `${selectedYear}_${m.name}`).r1) ? 'Filed' : 'Pending',
+        isQuarterEnd ? getStatusLabel(getStatus(client.id, `${selectedYear}_${activeQuarterConfig.r3bMonth}`).r3b) : 'N/A',
         client.gstProfile?.username || '---',
         client.gstProfile?.password || '---',
         getStatus(client.id).remark || ''
@@ -464,8 +509,8 @@ const QuarterlyFiling: React.FC = () => {
         client.legalName || '---',
         client.mobile || '---',
         client.gstProfile?.gstin || '---',
-        getStatus(client.id).r1 ? 'Filed' : 'Pending',
-        isQuarterEnd ? getStatusLabel(getStatus(client.id).r3b) : 'N/A',
+        activeQuarterConfig.months.every(m => getStatus(client.id, `${selectedYear}_${m.name}`).r1) ? 'Filed' : 'Pending',
+        isQuarterEnd ? getStatusLabel(getStatus(client.id, `${selectedYear}_${activeQuarterConfig.r3bMonth}`).r3b) : 'N/A',
         client.gstProfile?.username || '---',
         client.gstProfile?.password || '---',
         getStatus(client.id).remark || ''
@@ -659,9 +704,17 @@ const QuarterlyFiling: React.FC = () => {
         {viewMode === 'grid' ? (
           <div className="p-4 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {filteredClients.map((client, idx) => {
-              const statusInfo = getStatus(client.id);
-              const r1Done = statusInfo.r1;
-              const r3bLabel = getStatusLabel(statusInfo.r3b);
+              const r3bPeriod = `${selectedYear}_${activeQuarterConfig.r3bMonth}`;
+              const r3bLabel = isAllQuartersMode
+                ? (QUARTER_CONFIGS.some(q => getStatusLabel(getStatus(client.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Challan')
+                    ? 'Challan'
+                    : QUARTER_CONFIGS.every(q => getStatusLabel(getStatus(client.id, `${selectedYear}_${q.r3bMonth}`).r3b) === 'Filed')
+                      ? 'Filed'
+                      : 'Pending')
+                : getStatusLabel(getStatus(client.id, r3bPeriod).r3b);
+              const r1Done = isAllQuartersMode
+                ? QUARTER_CONFIGS.every(q => q.months.every(m => getStatus(client.id, `${selectedYear}_${m.name}`).r1))
+                : activeQuarterConfig.months.every(m => getStatus(client.id, `${selectedYear}_${m.name}`).r1);
               return (
                 <div key={client.id} className="p-3.5 bg-slate-50 hover:bg-white dark:bg-slate-800/40 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xs transition-all flex flex-col justify-between space-y-3">
                   <div>
@@ -842,8 +895,10 @@ const QuarterlyFiling: React.FC = () => {
                   </td>
                 </tr>
                 {sectorClients.map((client, idx) => {
+              const currentR3bPeriod = `${selectedYear}_${activeQuarterConfig ? activeQuarterConfig.r3bMonth : 'June'}`;
+              const currentR3bSt = getStatus(client.id, currentR3bPeriod);
+              const r3bStatus = getStatusLabel(currentR3bSt.r3b);
               const st = getStatus(client.id);
-              const r3bStatus = getStatusLabel(st.r3b);
               const isEditingPass = editingPasswordId === client.id;
               const theme = getClientColorTheme(client);
               return (
@@ -996,7 +1051,7 @@ const QuarterlyFiling: React.FC = () => {
                            ) : isQuarterEnd ? (
                              <button 
                                type="button"
-                               onClick={() => toggleStatus(client.id, 'r3b')} 
+                               onClick={() => toggleStatus(client.id, 'r3b', currentR3bPeriod)} 
                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium tracking-tight border transition-all cursor-pointer active:scale-95 shadow-2xs ${
                                   r3bStatus === 'Filed' 
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 hover:bg-emerald-100/80' 
@@ -1267,7 +1322,12 @@ const QuarterlyFiling: React.FC = () => {
                 type="button"
                 onClick={() => { 
                   const text = `*Entity Profile*\nTrade Name: ${selectedClient!.tradeName || 'N/A'}\nLegal Name: ${selectedClient!.legalName || 'N/A'}\nMobile: ${selectedClient!.mobile || 'N/A'}\nEmail: ${selectedClient!.email || 'N/A'}\n\n*GST Details*\nGSTIN: ${selectedClient!.gstProfile?.gstin || 'N/A'}\nStatus: ${selectedClient!.gstProfile?.gstStatus || 'N/A'}\nReg Type: ${selectedClient!.gstProfile?.regType || 'N/A'}\nFiling: ${selectedClient!.gstProfile?.filingFreq || 'N/A'}\nReg Date: ${formatDate(selectedClient!.gstProfile?.regDate)}\nJurisdiction: ${selectedClient!.gstProfile?.jurisdictionType || 'N/A'}\nSector/Range: ${selectedClient!.gstProfile?.sector || selectedClient!.gstProfile?.range || 'N/A'}\n\n*Credentials*\nGST User ID: ${selectedClient!.gstProfile?.username || 'N/A'}\nGST Password: ${selectedClient!.gstProfile?.password || 'N/A'}`;
-                  window.location.href = `whatsapp://send?text=${encodeURIComponent(text)}`;
+                  const phone = String(selectedClient!.mobile || '').replace(/\D/g, '');
+                  const cleanPhone = phone.length === 10 ? `91${phone}` : phone;
+                  const url = cleanPhone
+                    ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`
+                    : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+                  window.open(url, '_blank');
                   setActiveActionsId(null); 
                 }} 
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-xl transition-colors text-left group cursor-pointer"

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Client, NatureOfWork, ClientStatus } from '../../types.ts';
+import { Client, NatureOfWork, ClientStatus, Stakeholder } from '../../types.ts';
 import { api } from '../../services/api.ts';
 import { toast } from 'sonner';
 
@@ -40,6 +40,7 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['clients'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard_summary'] });
+      queryClient.invalidateQueries({ queryKey: ['nav_counts'] });
       toast.success(initialData ? 'IT Record Updated' : 'New IT Profile Created');
       onSave(saved);
       onClose();
@@ -50,6 +51,16 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
   });
 
   const isSaving = saveMutation.isPending;
+
+  const createItStakeholder = (designation?: string): Stakeholder => ({
+    id: Math.random().toString(36).substr(2, 9),
+    name: '',
+    mobile: '',
+    pan: '',
+    email: '',
+    dob: '',
+    designation: designation || 'Partner'
+  });
 
   const [formData, setFormData] = useState<Partial<Client>>({
     legalName: '',
@@ -69,6 +80,7 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
       employmentType: 'Private',
       businessName: '',
       itrFiled: 'ITR-1',
+      stakeholders: []
     },
     bankDetails: { bankName: '', accountNo: '', ifsc: '' },
     remarks: ''
@@ -78,7 +90,16 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
     if (isOpen) {
       setActiveTabStep(1);
       if (initialData) {
-        setFormData(initialData);
+        setFormData({
+          ...initialData,
+          itProfile: {
+            ...initialData.itProfile,
+            pan: initialData.itProfile?.pan || initialData.pan || '',
+            username: initialData.itProfile?.username || initialData.pan || '',
+            category: initialData.itProfile?.category || 'Individual',
+            stakeholders: initialData.itProfile?.stakeholders || initialData.gstProfile?.stakeholders || []
+          }
+        });
         setIsDataLinked(false);
       } else {
         resetForm();
@@ -110,12 +131,52 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
         pan: '', username: '', password: '', category: 'Individual',
         fatherName: '', dob: '', natureOfWork: 'Salaried',
         employmentType: 'Private', businessName: '', itrFiled: 'ITR-1',
+        stakeholders: []
       },
       bankDetails: { bankName: '', accountNo: '', ifsc: '' },
       remarks: ''
     });
     setError(null);
     setIsDataLinked(false);
+  };
+
+  const addItStakeholder = () => {
+    const defaultDesig = formData.itProfile?.category === 'Firm' ? 'Partner' :
+                         formData.itProfile?.category === 'HUF' ? 'Karta' :
+                         formData.itProfile?.category === 'Company' ? 'Director' : 'Member';
+    setFormData(prev => ({
+      ...prev,
+      itProfile: {
+        ...prev.itProfile!,
+        stakeholders: [...(prev.itProfile?.stakeholders || []), createItStakeholder(defaultDesig)]
+      }
+    }));
+  };
+
+  const removeItStakeholder = (id: string) => {
+    setFormData(prev => ({
+      ...prev,
+      itProfile: {
+        ...prev.itProfile!,
+        stakeholders: (prev.itProfile?.stakeholders || []).filter(s => s.id !== id)
+      }
+    }));
+  };
+
+  const handleItStakeholderChange = (idx: number, field: keyof Stakeholder, value: string) => {
+    setFormData(prev => {
+      const list = [...(prev.itProfile?.stakeholders || [])];
+      if (list[idx]) {
+        list[idx] = { ...list[idx], [field]: value };
+      }
+      return {
+        ...prev,
+        itProfile: {
+          ...prev.itProfile!,
+          stakeholders: list
+        }
+      };
+    });
   };
 
   const handlePanChange = (val: string) => {
@@ -140,6 +201,10 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
           match.gstProfile?.constitution === 'Trust' ? 'Trust' : 'Individual'
         );
 
+        const linkedStakeholders = match.itProfile?.stakeholders && match.itProfile.stakeholders.length > 0
+          ? match.itProfile.stakeholders
+          : match.gstProfile?.stakeholders || [];
+
         setFormData(prev => ({
           ...prev,
           id: match.id,
@@ -152,6 +217,7 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
           status: match.status || prev.status,
           bankDetails: match.bankDetails || prev.bankDetails,
           remarks: match.remarks || prev.remarks,
+          gstProfile: match.gstProfile || prev.gstProfile,
           itProfile: {
             ...prev.itProfile,
             ...(match.itProfile || {}),
@@ -160,10 +226,11 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
             category: itCategory,
             dob: fetchedDob || match.itProfile?.dob || prev.itProfile?.dob || '',
             businessName: match.tradeName || match.legalName || prev.itProfile?.businessName || '',
+            stakeholders: linkedStakeholders
           }
         }));
         setIsDataLinked(true);
-        toast.info("Auto-linked matching client records from Vault!");
+        toast.info("Auto-linked matching client records from Vault without overwriting!");
       } else {
         setIsDataLinked(false);
       }
@@ -192,6 +259,9 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
     } else if (formData.dob) {
       payload.dob = formData.dob;
       if (payload.itProfile) payload.itProfile.dob = formData.dob;
+    }
+    if (formData.itProfile?.stakeholders && payload.itProfile) {
+      payload.itProfile.stakeholders = formData.itProfile.stakeholders;
     }
 
     saveMutation.mutate(payload);
@@ -480,6 +550,117 @@ const ITClientFormModal: React.FC<ITClientFormModalProps> = ({ isOpen, onClose, 
                   </div>
                 </div>
               </div>
+
+              {/* Partner / Director / Member Stakeholders for Non-Individual entities */}
+              {formData.itProfile?.category !== 'Individual' && (
+                <div className="bg-slate-50 dark:bg-slate-800/40 p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                        <span>👥</span>
+                        <span>
+                          {formData.itProfile?.category === 'Firm' ? 'Partners & Designated Partners (with DOB)' :
+                           formData.itProfile?.category === 'HUF' ? 'HUF Karta & Members (with DOB)' :
+                           formData.itProfile?.category === 'Company' ? 'Directors & Managing Persons (with DOB)' :
+                           'Key Persons / Members (with DOB)'}
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Record each partner or member's personal Date of Birth to enable direct WhatsApp birthday greetings.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addItStakeholder}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1 shadow-xs cursor-pointer active:scale-95"
+                    >
+                      <span>+ Add {formData.itProfile?.category === 'Firm' ? 'Partner' : formData.itProfile?.category === 'HUF' ? 'Member' : 'Director'}</span>
+                    </button>
+                  </div>
+
+                  {(!formData.itProfile?.stakeholders || formData.itProfile.stakeholders.length === 0) ? (
+                    <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center space-y-2">
+                      <p className="text-xs text-slate-400">
+                        No individual {formData.itProfile?.category === 'Firm' ? 'partners' : formData.itProfile?.category === 'HUF' ? 'members' : 'directors'} added yet.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={addItStakeholder}
+                        className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                      >
+                        + Add first {formData.itProfile?.category === 'Firm' ? 'Partner' : formData.itProfile?.category === 'HUF' ? 'Member' : 'Director'}
+                      </button>
+                    </div>
+                  ) : (
+                    formData.itProfile.stakeholders.map((s, idx) => (
+                      <div key={s.id || idx} className="bg-white dark:bg-slate-850 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                            {s.designation || 'Member'} #{idx + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeItStakeholder(s.id)}
+                            className="text-rose-500 hover:text-rose-600 text-xs font-semibold cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-slate-400">Full Name *</label>
+                            <input
+                              className="w-full h-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2.5 rounded-lg text-xs font-medium"
+                              value={s.name || ''}
+                              onChange={e => handleItStakeholderChange(idx, 'name', e.target.value)}
+                              placeholder="Partner / Member Name"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-slate-400">Designation</label>
+                            <input
+                              className="w-full h-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2.5 rounded-lg text-xs font-medium"
+                              value={s.designation || ''}
+                              onChange={e => handleItStakeholderChange(idx, 'designation', e.target.value)}
+                              placeholder="e.g. Partner, Director, Karta"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-slate-400">Mobile Number</label>
+                            <input
+                              type="tel"
+                              className="w-full h-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2.5 rounded-lg text-xs font-mono font-medium"
+                              value={s.mobile || ''}
+                              onChange={e => handleItStakeholderChange(idx, 'mobile', e.target.value.replace(/\D/g, '').slice(0, 10))}
+                              placeholder="10-digit Mobile"
+                              maxLength={10}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-slate-400">PAN Number</label>
+                            <input
+                              className="w-full h-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2.5 rounded-lg text-xs font-mono font-bold uppercase"
+                              value={s.pan || ''}
+                              onChange={e => handleItStakeholderChange(idx, 'pan', e.target.value.toUpperCase().slice(0, 10))}
+                              placeholder="ABCDE1234F"
+                              maxLength={10}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase text-slate-400">Date of Birth (DOB) 🎂</label>
+                            <input
+                              type="date"
+                              className="w-full h-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2.5 rounded-lg text-xs font-medium"
+                              value={s.dob || ''}
+                              onChange={e => handleItStakeholderChange(idx, 'dob', e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
 
               <div className="bg-slate-50 dark:bg-slate-800/40 p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">

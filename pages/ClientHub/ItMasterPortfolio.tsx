@@ -303,7 +303,7 @@ const ItMasterPortfolio: React.FC<ItMasterPortfolioProps> = ({
   
   const proceedShare = () => {
     const final = shareText + (selectedNote ? '\n\n*Note:*\n' + selectedNote : '');
-    window.location.href = `whatsapp://send?text=${encodeURIComponent(final)}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(final)}`, '_blank');
     setIsShareModalOpen(false);
   };
 

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Check, Trash2, Calendar, AlertCircle, Sparkles, Clock, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Bell, Check, Trash2, Calendar, AlertCircle, Sparkles, Clock, CheckCircle2, ArrowRight, Cake, Send } from 'lucide-react';
 import { formatDate } from '../dateUtils';
 import { api } from '../services/api';
-import { calculateDefaultDueDate } from '../pages/Administration/DueDateSetting';
+import { calculateDefaultDueDate } from '../services/dueDateUtils';
 import { YEARS, FY_MONTHS, FY_QUARTERS } from '../pages/Compliance/GSTReturn/filinglogic/MonthlyFilingLogic';
+import { getBirthdayMetrics, getClientDob, extractAllBirthdayTargets, openWhatsAppWish, generateBirthdayWish, getBirthdaySettings } from '../services/birthdayService';
 
 // Storage Keys
 const NOTIFICATION_STORAGE_KEY = 'clientify_notifications_list_v1';
@@ -19,7 +20,13 @@ export interface NotificationItem {
   read: boolean;
   type: 'urgent' | 'info' | 'success';
   route?: string;
-  category?: 'due_date' | 'system' | 'general';
+  category?: 'due_date' | 'system' | 'general' | 'birthday';
+  metadata?: {
+    clientId?: string;
+    clientMobile?: string;
+    clientName?: string;
+    turningAge?: number;
+  };
 }
 
 const moduleRoutes: Record<string, string> = {
@@ -80,7 +87,7 @@ export const NotificationCenter: React.FC<{
     }
   }, [onOpenChange]);
 
-  const [activeTab, setActiveTab] = useState<'all' | 'due_dates' | 'system'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'due_dates' | 'birthday' | 'system'>('all');
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [activeBanner, setActiveBanner] = useState<{ title: string; body: string; type: string; route?: string } | null>(null);
@@ -216,6 +223,68 @@ export const NotificationCenter: React.FC<{
           }
         }
       });
+
+      // Scan client and partner/director birthdays for upcoming or today alerts
+      try {
+        const clients = await api.getClients().catch(() => []);
+        if (Array.isArray(clients)) {
+          clients.forEach(client => {
+            const targets = extractAllBirthdayTargets(client);
+            targets.forEach(target => {
+              const bMetrics = getBirthdayMetrics(target.dob, today);
+              if (bMetrics && bMetrics.daysUntil >= 0 && bMetrics.daysUntil <= 7) {
+                const notificationLogId = `bday_${target.id}_d_${bMetrics.daysUntil}`;
+                if (loggedNotifications[notificationLogId] !== todayStr) {
+                  const isToday = bMetrics.daysUntil === 0;
+                  const displayName = target.name;
+                  const title = isToday
+                    ? `🎂 Birthday Today: ${displayName}`
+                    : bMetrics.daysUntil === 1
+                      ? `🎉 Birthday Tomorrow: ${displayName}`
+                      : `🎈 Upcoming Birthday: ${displayName} (${bMetrics.daysUntil} days left)`;
+
+                  const body = isToday
+                    ? `Today is ${target.recipientName}'s birthday${bMetrics.turningAge ? ` (Turning ${bMetrics.turningAge})` : ''}! Send a warm wish on WhatsApp.`
+                    : `${target.recipientName}'s birthday is approaching on ${formatDate(bMetrics.nextBirthday)}${bMetrics.turningAge ? ` (Turning ${bMetrics.turningAge})` : ''}. Click to wish on WhatsApp.`;
+
+                  const alertItem: NotificationItem = {
+                    id: `bday_${target.id}_${todayStr}_${bMetrics.daysUntil}`,
+                    title,
+                    body,
+                    timestamp: new Date().toISOString(),
+                    read: false,
+                    type: isToday ? 'urgent' : 'info',
+                    route: '/admin-birthdays',
+                    category: 'birthday',
+                    metadata: {
+                      clientId: target.clientId,
+                      clientMobile: target.mobile,
+                      clientName: target.recipientName,
+                      turningAge: bMetrics.turningAge
+                    }
+                  };
+
+                  newAlerts.push(alertItem);
+
+                  if ('Notification' in window && Notification.permission === 'granted' && (isToday || bMetrics.daysUntil === 1)) {
+                    try {
+                      new Notification(title, {
+                        body,
+                        icon: '/icon.png',
+                        tag: notificationLogId,
+                      });
+                    } catch (e) {}
+                  }
+
+                  loggedNotifications[notificationLogId] = todayStr;
+                }
+              }
+            });
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to scan client birthdays for notifications:', err);
+      }
 
       if (newAlerts.length > 0) {
         setNotifications(prev => {
@@ -389,9 +458,11 @@ export const NotificationCenter: React.FC<{
 
   const unreadCount = useMemo(() => notifications.filter(n => !n.read).length, [notifications]);
   const urgentCount = useMemo(() => notifications.filter(n => !n.read && n.type === 'urgent').length, [notifications]);
+  const birthdayCount = useMemo(() => notifications.filter(n => n.category === 'birthday' && !n.read).length, [notifications]);
 
   const filteredNotifications = useMemo(() => {
     if (activeTab === 'due_dates') return notifications.filter(n => n.category === 'due_date');
+    if (activeTab === 'birthday') return notifications.filter(n => n.category === 'birthday');
     if (activeTab === 'system') return notifications.filter(n => n.category === 'system');
     return notifications;
   }, [notifications, activeTab]);
@@ -517,10 +588,10 @@ export const NotificationCenter: React.FC<{
                 </div>
 
                 {/* Filter Tabs */}
-                <div className="flex items-center gap-1 p-0.5 bg-slate-100 dark:bg-slate-800/60 rounded-xl">
+                <div className="flex items-center gap-1 p-0.5 bg-slate-100 dark:bg-slate-800/60 rounded-xl overflow-x-auto no-scrollbar">
                   <button
                     onClick={() => setActiveTab('all')}
-                    className={`flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                    className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all ${
                       activeTab === 'all' 
                         ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' 
                         : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -530,7 +601,7 @@ export const NotificationCenter: React.FC<{
                   </button>
                   <button
                     onClick={() => setActiveTab('due_dates')}
-                    className={`flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                    className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all ${
                       activeTab === 'due_dates' 
                         ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' 
                         : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -539,8 +610,19 @@ export const NotificationCenter: React.FC<{
                     Due Dates
                   </button>
                   <button
+                    onClick={() => setActiveTab('birthday')}
+                    className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all flex items-center justify-center gap-1 ${
+                      activeTab === 'birthday' 
+                        ? 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 shadow-xs' 
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <span>🎂 Birthdays</span>
+                    {birthdayCount > 0 && <span className="bg-rose-500 text-white rounded-full px-1 text-[8px] font-mono">{birthdayCount}</span>}
+                  </button>
+                  <button
                     onClick={() => setActiveTab('system')}
-                    className={`flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                    className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all ${
                       activeTab === 'system' 
                         ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs' 
                         : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -571,13 +653,15 @@ export const NotificationCenter: React.FC<{
                       >
                         <div className="flex items-start gap-2.5">
                           <div className={`h-6 w-6 rounded-md flex items-center justify-center shrink-0 mt-0.5 text-xs ${
-                            n.type === 'urgent' 
+                            n.category === 'birthday'
+                              ? 'bg-pink-100 text-pink-700 dark:bg-pink-950/80 dark:text-pink-300'
+                              : n.type === 'urgent' 
                               ? 'bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400' 
                               : n.type === 'success' 
                               ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400' 
                               : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400'
                           }`}>
-                            {n.type === 'urgent' ? '⚠️' : n.type === 'success' ? '✓' : 'ℹ️'}
+                            {n.category === 'birthday' ? '🎂' : n.type === 'urgent' ? '⚠️' : n.type === 'success' ? '✓' : 'ℹ️'}
                           </div>
 
                           <div className="flex-1 min-w-0">
@@ -589,9 +673,39 @@ export const NotificationCenter: React.FC<{
                             </div>
                             <p className="text-[10px] text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-2 leading-relaxed">{n.body}</p>
                             
-                            {n.route && (
+                            {/* Wish on WhatsApp Button for Birthday Notifications */}
+                            {n.category === 'birthday' && n.metadata?.clientMobile && (
+                              <div className="mt-1.5 flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const s = await getBirthdaySettings();
+                                    const msg = generateBirthdayWish(
+                                      s.template, 
+                                      { legalName: n.metadata?.clientName, tradeName: n.metadata?.clientName } as any, 
+                                      s.firmName, 
+                                      n.metadata?.turningAge
+                                    );
+                                    openWhatsAppWish(n.metadata?.clientMobile!, msg);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-2xs transition-all cursor-pointer active:scale-95"
+                                  title="Open WhatsApp with birthday wish"
+                                >
+                                  <Send className="h-2.5 w-2.5" />
+                                  <span>Wish on WhatsApp</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {n.route && n.category !== 'birthday' && (
                               <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 mt-1.5 hover:underline">
                                 Open Filing Module <ArrowRight className="h-2.5 w-2.5" />
+                              </span>
+                            )}
+                            {n.route && n.category === 'birthday' && (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-rose-600 dark:text-rose-400 mt-1 hover:underline">
+                                Open Birthday Hub <ArrowRight className="h-2.5 w-2.5" />
                               </span>
                             )}
                           </div>

@@ -15,6 +15,7 @@ import ViewControl from '../../../components/ViewControl';
 import { ExportImportMenu } from '../../../components/ExportImportMenu';
 import { exportToCSV, printList } from '../../../exportUtils';
 import { TableFilter } from '../../../components/TableFilter';
+import { parseCSVLine, openWhatsAppShare, findExistingLitigationRecord } from '../../../services/litigationImportHelper';
 
 export const NoticeDemand: React.FC = () => {
   const queryClient = useQueryClient();
@@ -199,7 +200,7 @@ export const NoticeDemand: React.FC = () => {
 
       for (const row of rows) {
         if (!row.trim()) continue;
-        const cols = row.split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+        const cols = parseCSVLine(row);
         if (!cols[0]) continue;
 
         const tradeName = cols[0];
@@ -215,8 +216,11 @@ export const NoticeDemand: React.FC = () => {
           (c.tradeName && c.tradeName.toLowerCase() === tradeName.toLowerCase())
         );
 
+        const existingRecord = findExistingLitigationRecord(allRecords, referenceNo);
+
         const newRecord: Partial<LitigationRecord> = {
-          clientId: client?.id || 'CLIENT-' + Math.random().toString(36).substr(2, 9),
+          ...(existingRecord ? { id: existingRecord.id } : {}),
+          clientId: client?.id || existingRecord?.clientId || ('CLIENT-' + Math.random().toString(36).substr(2, 9)),
           clientName: tradeName,
           category: 'Notice',
           status: 'Demand',
@@ -253,7 +257,7 @@ export const NoticeDemand: React.FC = () => {
       `Status: Confirmed Tax Demand\n\n` +
       `Immediate action required: Pay demand within 30 days or file First Appeal u/s 107 within 90 days.`;
     
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+    openWhatsAppShare(message, client?.mobile);
   };
 
   if (isLoading) return <Loader />;

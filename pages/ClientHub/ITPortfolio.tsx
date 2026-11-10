@@ -182,16 +182,34 @@ const ITPortfolioContent: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check if user uploaded a binary .xlsx / .xls file by accident
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      toast.error('Excel files (.xlsx / .xls) must be saved as CSV before importing. In Excel: click "File" > "Save As" > Choose "CSV (Comma delimited)".');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setIsUtilityOpen(false);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target?.result as string;
       if (!text) return;
 
-      const lines = text.split('\n');
+      if (text.startsWith('PK') || text.includes('\x00')) {
+        toast.error('The selected file appears to be a binary Excel workbook (.xlsx). Please export or save as CSV format first.');
+        setIsImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
+      const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
       const rows = lines.slice(1);
       
       setIsImporting(true);
       const clientsToImport: Partial<Client>[] = [];
+      const seenFilePans = new Set<string>();
+      let duplicateRowsInFile = 0;
       let errorCount = 0;
 
       for (const row of rows) {
@@ -199,7 +217,17 @@ const ITPortfolioContent: React.FC = () => {
         const values = parseCSVLine(row).map(v => v.replace(/^"|"$/g, '').trim());
         
         try {
-          const panVal = (values[5] || '').toUpperCase();
+          const panVal = (values[5] || '').toUpperCase().trim();
+          if (!panVal && !values[0]?.trim()) continue;
+
+          if (panVal) {
+            if (seenFilePans.has(panVal)) {
+              duplicateRowsInFile++;
+              continue;
+            }
+            seenFilePans.add(panVal);
+          }
+
           const clientData: Partial<Client> = {
             legalName: values[0] || 'Unknown Client',
             tradeName: values[1] || '',
@@ -208,6 +236,7 @@ const ITPortfolioContent: React.FC = () => {
             address: values[4] || '',
             status: (values[12] as ClientStatus) || 'Active',
             dob: values[9] || '',
+            pan: panVal,
             itProfile: {
               pan: panVal,
               username: values[6] || panVal || '',
@@ -221,9 +250,7 @@ const ITPortfolioContent: React.FC = () => {
             }
           };
 
-          if (clientData.itProfile?.pan || clientData.legalName) {
-            clientsToImport.push(clientData);
-          }
+          clientsToImport.push(clientData);
         } catch (err) {
           console.error("IT Import row parsing failed:", row, err);
           errorCount++;
@@ -231,10 +258,12 @@ const ITPortfolioContent: React.FC = () => {
       }
 
       let successCount = 0;
+      let updatedCount = 0;
       if (clientsToImport.length > 0) {
         try {
           const res = await api.bulkCreateClients(clientsToImport);
-          successCount = res.insertedCount || clientsToImport.length;
+          successCount = res.insertedCount || 0;
+          updatedCount = (res as any).updatedCount || 0;
         } catch (err) {
           console.error("Bulk import failed:", err);
           errorCount += clientsToImport.length;
@@ -242,7 +271,22 @@ const ITPortfolioContent: React.FC = () => {
       }
 
       setIsImporting(false);
-      toast.info(`IT Import finished. Success: ${successCount}, Errors: ${errorCount}`);
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+      queryClient.invalidateQueries({ queryKey: ['nav_counts'] });
+
+      let feedbackMsg = `IT Import finished!`;
+      if (successCount > 0 && updatedCount > 0) {
+        feedbackMsg += ` Successfully added ${successCount} new clients, updated ${updatedCount} existing clients.`;
+      } else if (successCount > 0) {
+        feedbackMsg += ` Successfully added ${successCount} new clients.`;
+      } else if (updatedCount > 0) {
+        feedbackMsg += ` Successfully updated ${updatedCount} existing clients (duplicate entries prevented).`;
+      }
+      if (duplicateRowsInFile > 0) {
+        feedbackMsg += ` (${duplicateRowsInFile} duplicate row${duplicateRowsInFile > 1 ? 's' : ''} in file ignored).`;
+      }
+
+      toast.success(feedbackMsg);
       handleRefresh();
       if (fileInputRef.current) fileInputRef.current.value = '';
       setIsUtilityOpen(false);
@@ -478,7 +522,7 @@ const ITPortfolioContent: React.FC = () => {
                 </button>
               </div>
             )}
-            <input type="file" ref={fileInputRef} onChange={handleImportCSV} className="hidden" accept=".csv" />
+            <input type="file" ref={fileInputRef} onChange={handleImportCSV} className="hidden" accept=".csv,text/csv,.xlsx,.xls" />
           </div>
 
           {/* Add IT Client Button */}

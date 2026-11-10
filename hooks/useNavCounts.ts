@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { api } from '../services/api';
 import { calculateRenewalDueDate } from '../dateUtils.ts';
+import { getBirthdayMetrics, getClientDob } from '../services/birthdayService';
 
 export function useNavCounts() {
   const queryClient = useQueryClient();
@@ -17,7 +18,10 @@ export function useNavCounts() {
   return useQuery({
     queryKey: ['nav_counts'],
     queryFn: async () => {
-      const rems = await api.getRemindersAll().catch(() => ({ litigation: [], work: [], foodLicenses: [] }));
+      const [rems, clients] = await Promise.all([
+        api.getRemindersAll().catch(() => ({ litigation: [], work: [], foodLicenses: [] })),
+        api.getClients().catch(() => [])
+      ]);
 
       const getDaysLeft = (dueDateStr?: string) => {
         if (!dueDateStr) return 999;
@@ -40,8 +44,25 @@ export function useNavCounts() {
 
       const remCount = urgentLit.length + urgentWork.length + urgentFood.length;
 
+      // Count birthdays today or upcoming in next 7 days
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      let birthdayCount = 0;
+      if (Array.isArray(clients)) {
+        clients.forEach(c => {
+          const dob = getClientDob(c);
+          if (dob) {
+            const metrics = getBirthdayMetrics(dob, now);
+            if (metrics && metrics.daysUntil >= 0 && metrics.daysUntil <= 7) {
+              birthdayCount++;
+            }
+          }
+        });
+      }
+
       return {
         'reminders': remCount,
+        'admin-birthdays': birthdayCount,
       } as Record<string, number>;
     },
     staleTime: 1000 * 30,

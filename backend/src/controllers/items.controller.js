@@ -30,6 +30,34 @@ export const createItem = async (req, res) => {
 
   try {
     const items = getCollection('items');
+
+    const userMatches = [req.user._id];
+    if (req.user._id) {
+      userMatches.push(req.user._id.toString());
+      if (ObjectId.isValid(req.user._id)) {
+        try { userMatches.push(new ObjectId(req.user._id)); } catch (e) {}
+      }
+    }
+
+    // Duplicate prevention for clients
+    if (name === 'client' && data) {
+      const gstin = data.gstProfile?.gstin ? data.gstProfile.gstin.trim().toUpperCase() : null;
+      if (gstin && gstin.length === 15) {
+        const existing = await items.findOne({
+          name: 'client',
+          'data.gstProfile.gstin': { $regex: new RegExp(`^${gstin}$`, 'i') },
+          createdBy: { $in: userMatches }
+        });
+        if (existing) {
+          return res.status(409).json({
+            error: `Client with GSTIN "${gstin}" already exists (${existing.data?.tradeName || existing.data?.legalName}).`,
+            existingClient: existing.data,
+            existingId: existing._id
+          });
+        }
+      }
+    }
+
     const newItem = {
       name, // e.g., 'client', 'litigation', 'invoice'
       data: data || {},
@@ -1388,33 +1416,139 @@ export const bulkCreateClients = async (req, res) => {
   try {
     const items = getCollection('items');
     const now = new Date();
-    const newItems = clients.map(clientData => ({
-      name: 'client',
-      data: clientData,
-      createdBy: req.user._id,
-      creatorName: req.user.username,
-      createdAt: now,
-      updatedAt: now
-    }));
+
+    const userMatches = [req.user._id];
+    if (req.user._id) {
+      userMatches.push(req.user._id.toString());
+      if (ObjectId.isValid(req.user._id)) {
+        try { userMatches.push(new ObjectId(req.user._id)); } catch (e) {}
+      }
+    }
+
+    // Fetch existing clients to prevent duplicate GSTIN/PAN additions
+    let existingClients = [];
+    if (items.find) {
+      existingClients = await items.find({
+        name: 'client',
+        createdBy: { $in: userMatches }
+      }).toArray();
+    }
+
+    const gstinMap = new Map();
+    const panMap = new Map();
+
+    existingClients.forEach(item => {
+      const gstin = item.data?.gstProfile?.gstin ? item.data.gstProfile.gstin.trim().toUpperCase() : null;
+      const pan = (item.data?.pan || item.data?.itProfile?.pan || (gstin && gstin.length >= 12 ? gstin.substring(2, 12) : null))?.trim().toUpperCase();
+
+      if (gstin && !gstinMap.has(gstin)) gstinMap.set(gstin, item);
+      if (pan && !panMap.has(pan)) panMap.set(pan, item);
+    });
 
     let insertedCount = 0;
-    if (items.insertMany) {
-      const result = await items.insertMany(newItems);
-      insertedCount = result.insertedCount || newItems.length;
-    } else {
-      for (const item of newItems) {
-        await items.insertOne(item);
+    let updatedCount = 0;
+    const batchGstinsSeen = new Set();
+    const batchPansSeen = new Set();
+
+    for (const clientData of clients) {
+      if (!clientData) continue;
+
+      const rawGstin = clientData.gstProfile?.gstin ? clientData.gstProfile.gstin.trim().toUpperCase() : null;
+      const rawPan = (clientData.pan || clientData.itProfile?.pan || (rawGstin && rawGstin.length >= 12 ? rawGstin.substring(2, 12) : null))?.trim().toUpperCase();
+
+      // Deduplicate rows within the same imported batch
+      if (rawGstin && batchGstinsSeen.has(rawGstin)) {
+        continue;
       }
-      insertedCount = newItems.length;
+      if (rawGstin) batchGstinsSeen.add(rawGstin);
+      if (rawPan) batchPansSeen.add(rawPan);
+
+      // Check if client already exists in the database by GSTIN or PAN
+      const existingItem = (rawGstin ? gstinMap.get(rawGstin) : null) || (rawPan ? panMap.get(rawPan) : null);
+
+      if (existingItem) {
+        // Update & merge existing client instead of creating duplicate
+        const mergedData = {
+          ...existingItem.data,
+          ...clientData,
+          tradeName: clientData.tradeName && clientData.tradeName !== 'Unknown Client' ? clientData.tradeName : (existingItem.data.tradeName || clientData.tradeName),
+          legalName: clientData.legalName && clientData.legalName !== 'Unknown Entity' ? clientData.legalName : (existingItem.data.legalName || clientData.legalName),
+          mobile: clientData.mobile || existingItem.data.mobile || '',
+          email: clientData.email || existingItem.data.email || '',
+          status: clientData.status || existingItem.data.status || 'Active',
+          gstProfile: clientData.gstProfile ? {
+            ...(existingItem.data.gstProfile || {}),
+            ...clientData.gstProfile,
+            gstin: rawGstin || existingItem.data.gstProfile?.gstin,
+            pan: rawPan || existingItem.data.gstProfile?.pan || (rawGstin ? rawGstin.substring(2, 12) : ''),
+            username: clientData.gstProfile.username || existingItem.data.gstProfile?.username || rawGstin || '',
+            password: clientData.gstProfile.password || existingItem.data.gstProfile?.password || '',
+            stakeholders: (existingItem.data.gstProfile?.stakeholders && existingItem.data.gstProfile.stakeholders.length > 0)
+              ? existingItem.data.gstProfile.stakeholders
+              : (clientData.gstProfile.stakeholders || [])
+          } : existingItem.data.gstProfile,
+          itProfile: clientData.itProfile ? {
+            ...(existingItem.data.itProfile || {}),
+            ...clientData.itProfile,
+            pan: rawPan || existingItem.data.itProfile?.pan || (rawGstin ? rawGstin.substring(2, 12) : ''),
+            username: clientData.itProfile.username || existingItem.data.itProfile?.username || rawPan || '',
+            password: clientData.itProfile.password || existingItem.data.itProfile?.password || ''
+          } : existingItem.data.itProfile
+        };
+
+        if (items.updateOne) {
+          await items.updateOne({ _id: existingItem._id }, { $set: { data: mergedData, updatedAt: now } });
+        }
+        existingItem.data = mergedData;
+        updatedCount++;
+      } else {
+        // Fresh new client insertion
+        const newItem = {
+          name: 'client',
+          data: {
+            ...clientData,
+            gstProfile: clientData.gstProfile ? {
+              ...clientData.gstProfile,
+              gstin: rawGstin || clientData.gstProfile.gstin,
+              pan: rawPan || clientData.gstProfile.pan || (rawGstin ? rawGstin.substring(2, 12) : '')
+            } : undefined,
+            itProfile: clientData.itProfile ? {
+              ...clientData.itProfile,
+              pan: rawPan || clientData.itProfile.pan || (rawGstin ? rawGstin.substring(2, 12) : '')
+            } : undefined
+          },
+          createdBy: req.user._id,
+          creatorName: req.user.username,
+          createdAt: now,
+          updatedAt: now
+        };
+
+        if (items.insertOne) {
+          const insertResult = await items.insertOne(newItem);
+          const insertedId = insertResult.insertedId || newItem._id;
+          newItem._id = insertedId;
+          newItem.data.id = insertedId.toString();
+        }
+
+        if (rawGstin) gstinMap.set(rawGstin, newItem);
+        if (rawPan) panMap.set(rawPan, newItem);
+        insertedCount++;
+      }
     }
 
     const io = req.app.get('io');
     if (io) {
       const room = `user_${req.user._id.toString()}`;
-      io.to(room).emit('db_item_change', { type: 'bulk_insert', category: 'client', count: insertedCount, timestamp: now });
+      io.to(room).emit('db_item_change', {
+        type: 'bulk_insert',
+        category: 'client',
+        count: insertedCount,
+        updatedCount,
+        timestamp: now
+      });
     }
 
-    res.status(201).json({ success: true, insertedCount });
+    res.status(200).json({ success: true, insertedCount, updatedCount });
   } catch (err) {
     console.error('Bulk Create Clients Error:', err);
     res.status(500).json({ error: 'Failed to bulk import clients.' });

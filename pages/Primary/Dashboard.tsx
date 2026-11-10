@@ -7,7 +7,7 @@ import {
   Building2, Users, FileText, CheckCircle2, Clock, 
   Scale, ShieldAlert, AlertTriangle, ArrowRight, RefreshCw, 
   Receipt, Briefcase, FileCheck, Landmark, MessageSquare, 
-  Calendar, Trash2, ChevronDown, Check, Sparkles, AlertCircle, ArrowUpRight
+  Calendar, Trash2, ChevronDown, Check, Sparkles, AlertCircle, ArrowUpRight, Cake
 } from 'lucide-react';
 import { useModuleData } from '../../hooks/useModuleData.ts';
 import { MetricData, ActiveView, LitigationRecord, Client, InvoiceRecord } from '../../types.ts';
@@ -60,6 +60,7 @@ const FoodLicenses = lazy(() => import('../Miscellaneous/FoodLicenses.tsx'));
 const MSMERegistration = lazy(() => import('../Miscellaneous/MSMERegistration.tsx'));
 const Miscellaneouswork = lazy(() => import('../Miscellaneous/Miscellaneouswork.tsx'));
 const Reminders = lazy(() => import('../Administration/Reminders.tsx'));
+const BirthdayWishes = lazy(() => import('../Administration/BirthdayWishes.tsx'));
 const Messenger = lazy(() => import('../Administration/Messenger.tsx'));
 const Invoices = lazy(() => import('../Administration/invoice/Invoices.tsx'));
 const AddInvoice = lazy(() => import('../Administration/invoice/addinvoice.tsx'));
@@ -1093,7 +1094,8 @@ const Dashboard: React.FC = () => {
                 title="Office & Billing Administration" 
                 subtitle="Firm communications, billing invoices, receipts, and compliance due dates" 
               />
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3.5">
+                <CompactCard label="Birthdays" count={0} viewId="admin-birthdays" badgeGradient="from-pink-500 to-rose-600" icon={<Cake className="h-4 w-4" />} />
                 <CompactCard label="Messenger" count={0} viewId="messenger" badgeGradient="from-indigo-500 to-indigo-700" icon={<MessageSquare className="h-4 w-4" />} />
                 <CompactCard label="Reminders" count={0} viewId="reminders" badgeGradient="from-rose-500 to-rose-700" icon={<Clock className="h-4 w-4" />} />
                 <CompactCard label="Invoices" count={invoices.filter(i => i.status !== 'Paid').length} viewId="admin-invoices" badgeGradient="from-slate-800 to-slate-950" icon={<Receipt className="h-4 w-4" />} />
@@ -1134,6 +1136,7 @@ const Dashboard: React.FC = () => {
       case 'misc-food-lic': return <FoodLicenses />;
       case 'misc-msme': return <MSMERegistration />;
       case 'misc-work': return <Miscellaneouswork />;
+      case 'admin-birthdays': return <BirthdayWishes />;
       case 'reminders': return <Reminders />;
       case 'messenger': return <Messenger />;
       case 'admin-invoices': return <Invoices onViewChange={handleViewChange} />;
@@ -1183,6 +1186,7 @@ const Dashboard: React.FC = () => {
       'misc-food-lic': { label: 'Food License', desc: 'FSSAI Registration and Renewal Hub' },
       'misc-msme': { label: 'MSME Registration', desc: 'Udyam Registration and Certificate Tracking' },
       'misc-work': { label: 'Work Log', desc: 'Staff Task & Job Management' },
+      'admin-birthdays': { label: 'Birthday Wishes', desc: 'Client Birthday Greetings & WhatsApp Wishes' },
       'messenger': { label: 'Practice Messenger', desc: 'Internal Office Communication' },
       'reminders': { label: 'Reminders', desc: 'Statutory Compliance Deadline Monitor' },
       'admin-invoices': { label: 'Invoices', desc: 'Professional Billing and Receivables' },

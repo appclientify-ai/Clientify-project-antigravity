@@ -232,7 +232,7 @@ const ITRReturn: React.FC = () => {
   };
 
   const shareViaWhatsApp = (text: string) => {
-    window.open(`whatsapp://send?text=${encodeURIComponent(text)}`, '_blank');
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
   if (isClientsLoading) return <Loader />;

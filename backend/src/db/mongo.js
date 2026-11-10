@@ -38,8 +38,28 @@ function saveFallbackData() {
         await fs.promises.mkdir(DATA_DIR, { recursive: true });
       }
       const tmpPath = `${DATA_FILE}.tmp`;
-      await fs.promises.writeFile(tmpPath, JSON.stringify(fallbackData, null, 2), 'utf-8');
-      await fs.promises.rename(tmpPath, DATA_FILE);
+      const payload = JSON.stringify(fallbackData, null, 2);
+      await fs.promises.writeFile(tmpPath, payload, 'utf-8');
+
+      // On Windows, fs.promises.rename can fail with EPERM or EBUSY if the file is momentarily open.
+      // We implement retry backoff with fallback to copyFile and unlink.
+      let renamed = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await fs.promises.rename(tmpPath, DATA_FILE);
+          renamed = true;
+          break;
+        } catch (renameErr) {
+          if (attempt < 4) {
+            await new Promise(r => setTimeout(r, 60 * (attempt + 1)));
+          }
+        }
+      }
+
+      if (!renamed) {
+        await fs.promises.copyFile(tmpPath, DATA_FILE);
+        await fs.promises.unlink(tmpPath).catch(() => {});
+      }
     } catch (e) {
       console.warn('⚠️ Fallback data save warning:', e.message);
     }

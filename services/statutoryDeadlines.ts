@@ -1,4 +1,4 @@
-import { calculateDefaultDueDate } from '../pages/Administration/DueDateSetting';
+import { calculateDefaultDueDate } from './dueDateUtils';
 
 export const COMPLIANCE_STORAGE_KEY = 'clientify_global_compliance_dates_v1';
 

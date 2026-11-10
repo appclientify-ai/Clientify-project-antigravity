@@ -401,8 +401,8 @@ export const Messenger: React.FC = () => {
     if (!client) return;
     const personalizedMsg = formatMessage(templateText, client);
     const cleanMobile = String(client.mobile || '').replace(/\D/g, '');
-    const url = `whatsapp://send?phone=91${cleanMobile}&text=${encodeURIComponent(personalizedMsg)}`;
-    window.location.href = url;
+    const url = `https://api.whatsapp.com/send?phone=91${cleanMobile}&text=${encodeURIComponent(personalizedMsg)}`;
+    window.open(url, '_blank');
     if (queueIndex < selectedClientsList.length - 1) {
       setQueueIndex(queueIndex + 1);
     } else {
@@ -721,7 +721,9 @@ export const Messenger: React.FC = () => {
                         <span className="font-semibold text-slate-400 uppercase text-[10px]">Mobile:</span>
                         {c.mobile ? (
                           <a
-                            href={`whatsapp://send?phone=91${c.mobile}`}
+                            href={`https://api.whatsapp.com/send?phone=91${String(c.mobile || '').replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
                             className="font-semibold font-mono text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1 hover:underline"
                             title="Direct WhatsApp Chat"
@@ -878,7 +880,9 @@ export const Messenger: React.FC = () => {
                           {c.mobile ? (
                             <div className="flex items-center gap-1.5">
                               <a
-                                href={`whatsapp://send?phone=91${c.mobile}`}
+                                href={`https://api.whatsapp.com/send?phone=91${String(c.mobile || '').replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
                                 className="text-xs font-semibold font-mono text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1 hover:underline"
                                 title="Chat on WhatsApp"

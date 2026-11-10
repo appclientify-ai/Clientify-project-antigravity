@@ -15,6 +15,7 @@ import ViewControl from '../../../components/ViewControl';
 import { ExportImportMenu } from '../../../components/ExportImportMenu';
 import { TableFilter } from '../../../components/TableFilter';
 import { exportToCSV, printList } from '../../../exportUtils';
+import { parseCSVLine, openWhatsAppShare, findExistingLitigationRecord } from '../../../services/litigationImportHelper';
 
 type ReplyFilter = 'All' | 'recent' | 'awaiting';
 
@@ -251,7 +252,7 @@ const NoticeFiled: React.FC = () => {
 
       for (const row of rows) {
         if (!row.trim()) continue;
-        const cols = row.split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+        const cols = parseCSVLine(row);
         if (!cols[0]) continue;
 
         const tradeName = cols[0];
@@ -268,8 +269,11 @@ const NoticeFiled: React.FC = () => {
           (c.tradeName && c.tradeName.toLowerCase() === tradeName.toLowerCase())
         );
 
+        const existingRecord = findExistingLitigationRecord(allRecords, referenceNo);
+
         const newRecord: Partial<LitigationRecord> = {
-          clientId: client?.id || 'CLIENT-' + Math.random().toString(36).substr(2, 9),
+          ...(existingRecord ? { id: existingRecord.id } : {}),
+          clientId: client?.id || existingRecord?.clientId || ('CLIENT-' + Math.random().toString(36).substr(2, 9)),
           clientName: tradeName,
           category: 'Notice',
           status: 'Filed',
@@ -307,7 +311,7 @@ const NoticeFiled: React.FC = () => {
       `Status: Reply Filed (Awaiting Order)\n\n` +
       `Reply has been submitted on the GST Portal. Awaiting department proceedings/order.`;
     
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+    openWhatsAppShare(message, client?.mobile);
   };
 
   if (isLoading) return <Loader />;

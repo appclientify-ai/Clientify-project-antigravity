@@ -102,7 +102,9 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
     pan: '',
     email: '',
     itPassword: '',
-    address: ''
+    address: '',
+    dob: '',
+    designation: ''
   });
 
   const [formData, setFormData] = useState<Partial<Client>>({
@@ -778,6 +780,16 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
     }
     if (formData.gstProfile.gstin.trim().length !== 15) {
       return setError("GSTIN must be exactly 15 characters.");
+    }
+
+    const cleanGstin = formData.gstProfile.gstin.trim().toUpperCase();
+    const existingClients = queryClient.getQueryData<Client[]>(['clients']) || [];
+    const duplicateClient = existingClients.find(c => 
+      c.id !== formData.id && 
+      c.gstProfile?.gstin?.trim().toUpperCase() === cleanGstin
+    );
+    if (duplicateClient) {
+      return setError(`A client with GSTIN "${cleanGstin}" is already registered (${duplicateClient.tradeName || duplicateClient.legalName}). Duplicate GSTIN cannot be added.`);
     }
 
     const constitution = formData.gstProfile?.constitution || 'Proprietorship';
@@ -1534,7 +1546,7 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                           )}
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                           <div className="space-y-1.5">
                             <div className="flex items-center justify-between">
                               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -1588,6 +1600,35 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                               onChange={e => handleStakeholderFieldChange(idx, 'pan', e.target.value.toUpperCase().slice(0, 10))} 
                               placeholder="e.g. ABCDE1234F" 
                               maxLength={10}
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                Date of Birth 🎂
+                              </label>
+                              {s.dob && idx === 0 && s.dob === formData.dob && (
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                                  ✓ Synced
+                                </span>
+                              )}
+                            </div>
+                            <input 
+                              type="date" 
+                              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 w-full outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" 
+                              value={s.dob || ''} 
+                              onChange={e => {
+                                const val = e.target.value;
+                                handleStakeholderFieldChange(idx, 'dob', val);
+                                if (idx === 0) {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    dob: val,
+                                    gstProfile: prev.gstProfile ? { ...prev.gstProfile, dob: val } : undefined
+                                  }));
+                                }
+                              }} 
                             />
                           </div>
 

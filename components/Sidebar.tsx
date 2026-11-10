@@ -23,6 +23,7 @@ import {
   Settings, 
   Archive, 
   History,
+  Cake,
   ChevronRight, 
   ChevronDown, 
   ArrowRight,
@@ -181,6 +182,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     {
       group: 'Administration',
       items: [
+        { id: 'admin-birthdays', label: 'Birthday Wishes', icon: <Cake className="h-4.5 w-4.5" /> },
         { id: 'messenger', label: 'Client Messenger', icon: <MessageSquare className="h-4.5 w-4.5" /> },
         { id: 'reminders', label: 'Compliance Reminders', icon: <Bell className="h-4.5 w-4.5" /> },
         { id: 'admin-invoices', label: 'Fee Invoices', icon: <Receipt className="h-4.5 w-4.5" /> },

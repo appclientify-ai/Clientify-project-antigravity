@@ -15,6 +15,7 @@ import ViewControl from '../../../components/ViewControl';
 import { ExportImportMenu } from '../../../components/ExportImportMenu';
 import { TableFilter } from '../../../components/TableFilter';
 import { exportToCSV, printList } from '../../../exportUtils';
+import { parseCSVLine, findExistingLitigationRecord } from '../../../services/litigationImportHelper';
 
 type HearingFilter = 'All' | 'gt15' | 'gt5' | 'urgent';
 
@@ -302,7 +303,7 @@ const AppealFiled: React.FC = () => {
 
       for (const row of rows) {
         if (!row.trim()) continue;
-        const cols = row.split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+        const cols = parseCSVLine(row);
         if (!cols[0]) continue;
 
         const tradeName = cols[0];
@@ -319,9 +320,12 @@ const AppealFiled: React.FC = () => {
           (c.gstProfile?.gstin && c.gstProfile.gstin.toLowerCase() === tradeName.toLowerCase())
         );
 
+        const existingRecord = findExistingLitigationRecord(allRecords, referenceNo);
+
         try {
           await api.saveLitigationRecord({
-            clientId: client?.id || clientId || 'CLIENT-' + Math.random().toString(36).substr(2, 9),
+            ...(existingRecord ? { id: existingRecord.id } : {}),
+            clientId: client?.id || existingRecord?.clientId || clientId || ('CLIENT-' + Math.random().toString(36).substr(2, 9)),
             clientName: client?.tradeName || tradeName,
             category: 'Appeal',
             status: 'Filed',

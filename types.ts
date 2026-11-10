@@ -50,6 +50,8 @@ export interface Stakeholder {
   email?: string;
   itPassword?: string;
   address?: string;
+  dob?: string;
+  designation?: string;
 }
 
 export interface GSTProfile {
@@ -100,6 +102,7 @@ export interface ITProfile {
   };
   fileType?: string;
   auditApplicable?: boolean;
+  stakeholders?: Stakeholder[];
 }
 
 export interface BankDetails {

@@ -187,10 +187,27 @@ const GSTPortfolioContent: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check if user uploaded a binary .xlsx / .xls file by accident
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      toast.error('Excel files (.xlsx / .xls) must be saved as CSV before importing. In Excel: click "File" > "Save As" > Choose "CSV (Comma delimited)".');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setIsUtilityOpen(false);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target?.result as string;
       if (!text) return;
+
+      // Check for binary file signatures (e.g. zip/xlsx header PK)
+      if (text.startsWith('PK') || text.includes('\x00')) {
+        toast.error('The selected file appears to be a binary Excel workbook (.xlsx). Please export or save as CSV format first.');
+        setIsImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
 
       const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
       if (lines.length <= 1) {
@@ -201,6 +218,8 @@ const GSTPortfolioContent: React.FC = () => {
       const rows = lines.slice(1);
       setIsImporting(true);
       const clientsToImport: Partial<Client>[] = [];
+      const seenFileGstins = new Set<string>();
+      let duplicateRowsInFile = 0;
       let errorCount = 0;
 
       for (const row of rows) {
@@ -208,19 +227,31 @@ const GSTPortfolioContent: React.FC = () => {
         const values = parseCSVLine(row);
         
         try {
+          const rawGstin = (values[4] || '').trim().toUpperCase();
+          if (!rawGstin) continue;
+
+          // Prevent duplicate rows within the same imported file
+          if (seenFileGstins.has(rawGstin)) {
+            duplicateRowsInFile++;
+            continue;
+          }
+          seenFileGstins.add(rawGstin);
+
+          const pan = rawGstin.length >= 12 ? rawGstin.substring(2, 12) : '';
           const clientData: Partial<Client> = {
-            tradeName: values[0] || 'Unknown Client',
-            legalName: values[1] || values[0] || 'Unknown Entity',
-            mobile: values[2] || '',
-            email: values[3] || '',
+            tradeName: values[0]?.trim() || values[1]?.trim() || 'Client',
+            legalName: values[1]?.trim() || values[0]?.trim() || 'Entity',
+            mobile: values[2]?.trim() || '',
+            email: values[3]?.trim() || '',
+            pan: pan,
             status: (values[11] as ClientStatus) || 'Active',
             gstProfile: {
-              gstin: values[4] || '',
-              pan: values[4]?.substring(2, 12) || '',
-              username: values[5] || values[4] || '',
-              password: values[6] || '',
+              gstin: rawGstin,
+              pan: pan,
+              username: values[5]?.trim() || rawGstin,
+              password: values[6]?.trim() || '',
               constitution: (values[7] as ConstitutionType) || 'Proprietorship',
-              regDate: values[8] || '',
+              regDate: values[8]?.trim() || '',
               regType: (values[9] as GstRegType) || 'Regular',
               filingFreq: (values[10] as GstFilingFreq) || 'Monthly',
               gstStatus: 'Active',
@@ -228,28 +259,51 @@ const GSTPortfolioContent: React.FC = () => {
             }
           };
 
-          if (clientData.gstProfile?.gstin) {
-            clientsToImport.push(clientData);
-          }
+          clientsToImport.push(clientData);
         } catch (err) {
           console.error("Import row parsing failed:", row, err);
           errorCount++;
         }
       }
 
+      if (clientsToImport.length === 0) {
+        setIsImporting(false);
+        toast.error('No valid client rows with GSTIN found in file.');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
       let successCount = 0;
-      if (clientsToImport.length > 0) {
-        try {
-          const res = await api.bulkCreateClients(clientsToImport);
-          successCount = res.insertedCount || clientsToImport.length;
-        } catch (err) {
-          console.error("Bulk import failed:", err);
-          errorCount += clientsToImport.length;
-        }
+      let updatedCount = 0;
+      try {
+        const res = await api.bulkCreateClients(clientsToImport);
+        successCount = res.insertedCount || 0;
+        updatedCount = (res as any).updatedCount || 0;
+      } catch (err) {
+        console.error("Bulk import failed:", err);
+        errorCount += clientsToImport.length;
       }
 
       setIsImporting(false);
-      toast.success(`Import finished! Successfully added ${successCount} clients.${errorCount > 0 ? ` (Errors: ${errorCount})` : ''}`);
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+      queryClient.invalidateQueries({ queryKey: ['nav_counts'] });
+
+      let feedbackMsg = `Import finished!`;
+      if (successCount > 0 && updatedCount > 0) {
+        feedbackMsg += ` Successfully added ${successCount} new clients, updated ${updatedCount} existing clients.`;
+      } else if (successCount > 0) {
+        feedbackMsg += ` Successfully added ${successCount} new clients.`;
+      } else if (updatedCount > 0) {
+        feedbackMsg += ` Successfully updated ${updatedCount} existing clients (duplicate entries prevented).`;
+      }
+      if (duplicateRowsInFile > 0) {
+        feedbackMsg += ` (${duplicateRowsInFile} duplicate row${duplicateRowsInFile > 1 ? 's' : ''} in file ignored).`;
+      }
+      if (errorCount > 0) {
+        feedbackMsg += ` (${errorCount} error${errorCount > 1 ? 's' : ''}).`;
+      }
+
+      toast.success(feedbackMsg);
       handleRefresh();
       if (fileInputRef.current) fileInputRef.current.value = '';
       setIsUtilityOpen(false);
@@ -493,7 +547,7 @@ const GSTPortfolioContent: React.FC = () => {
                 </button>
               </div>
             )}
-            <input type="file" ref={fileInputRef} onChange={handleImportCSV} className="hidden" accept=".csv" />
+            <input type="file" ref={fileInputRef} onChange={handleImportCSV} className="hidden" accept=".csv,text/csv,.xlsx,.xls" />
           </div>
 
           {/* Primary CTA - Add GST Client Button (Dark enterprise / Midnight Slate) */}

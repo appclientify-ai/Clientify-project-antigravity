@@ -166,7 +166,7 @@ const CompositionFiling: React.FC = () => {
       finalMessage = `${selectedNote.trim()}\n\n${shareText}`;
     }
     const encodedText = encodeURIComponent(finalMessage);
-    window.open(`whatsapp://send?text=${encodedText}`, '_blank');
+    window.open(`https://api.whatsapp.com/send?text=${encodedText}`, '_blank');
     setIsShareModalOpen(false);
   };
 
@@ -1011,7 +1011,12 @@ const CompositionFiling: React.FC = () => {
                 type="button"
                 onClick={() => { 
                   const text = `*Entity Profile*\nTrade Name: ${selectedClient!.tradeName || 'N/A'}\nLegal Name: ${selectedClient!.legalName || 'N/A'}\nMobile: ${selectedClient!.mobile || 'N/A'}\nEmail: ${selectedClient!.email || 'N/A'}\n\n*GST Details*\nGSTIN: ${selectedClient!.gstProfile?.gstin || 'N/A'}\nStatus: ${selectedClient!.gstProfile?.gstStatus || 'N/A'}\nReg Type: ${selectedClient!.gstProfile?.regType || 'N/A'}\nFiling: ${selectedClient!.gstProfile?.filingFreq || 'N/A'}\nReg Date: ${formatDate(selectedClient!.gstProfile?.regDate)}\nJurisdiction: ${selectedClient!.gstProfile?.jurisdictionType || 'N/A'}\nSector/Range: ${selectedClient!.gstProfile?.sector || selectedClient!.gstProfile?.range || 'N/A'}\n\n*Credentials*\nGST User ID: ${selectedClient!.gstProfile?.username || 'N/A'}\nGST Password: ${selectedClient!.gstProfile?.password || 'N/A'}`;
-                  window.location.href = `whatsapp://send?text=${encodeURIComponent(text)}`;
+                  const phone = String(selectedClient!.mobile || '').replace(/\D/g, '');
+                  const cleanPhone = phone.length === 10 ? `91${phone}` : phone;
+                  const url = cleanPhone
+                    ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`
+                    : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+                  window.open(url, '_blank');
                   setActiveActionsId(null); 
                 }} 
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-xl transition-colors text-left group cursor-pointer"

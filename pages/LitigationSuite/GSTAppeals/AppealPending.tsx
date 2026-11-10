@@ -15,6 +15,7 @@ import { EditableRemark } from '../../../components/EditableRemark';
 import { formatDate } from '../../../dateUtils';
 import ViewControl from '../../../components/ViewControl';
 import { TableFilter } from '../../../components/TableFilter';
+import { parseCSVLine, openWhatsAppShare, findExistingLitigationRecord } from '../../../services/litigationImportHelper';
 
 type DueDateFilter = 'All' | 'gt15' | 'gt5' | 'urgent';
 
@@ -283,7 +284,7 @@ const AppealPending: React.FC = () => {
       const rows = lines.slice(1);
       let count = 0;
       for (const row of rows) {
-        const cols = row.split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+        const cols = parseCSVLine(row);
         if (!cols[0]) continue;
         const tradeName = cols[0];
         const gstin = cols[1] || '';
@@ -296,8 +297,10 @@ const AppealPending: React.FC = () => {
           (c.gstProfile?.gstin && gstin && c.gstProfile.gstin.toLowerCase() === gstin.toLowerCase()) ||
           (c.tradeName && c.tradeName.toLowerCase() === tradeName.toLowerCase())
         );
+        const existingRecord = findExistingLitigationRecord(records, referenceNo);
         const newRecord: Partial<LitigationRecord> = {
-          clientId: client?.id || 'CLIENT-' + Math.random().toString(36).substr(2, 9),
+          ...(existingRecord ? { id: existingRecord.id } : {}),
+          clientId: client?.id || existingRecord?.clientId || ('CLIENT-' + Math.random().toString(36).substr(2, 9)),
           clientName: tradeName,
           category: 'Appeal',
           status: 'Pending',
@@ -329,7 +332,7 @@ const AppealPending: React.FC = () => {
       `Due Date: ${formatDate(rec.dueDate)} (${dl < 0 ? `${Math.abs(dl)}d overdue` : `${dl}d left`})\n` +
       `Status: Pending First Appeal\n\n` +
       `Please provide the required submissions at the earliest.`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+    openWhatsAppShare(msg, client?.mobile);
   };
 
   const selectedActionRecord = useMemo(() => records.find(r => r.id === activeActionsId), [records, activeActionsId]);

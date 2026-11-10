@@ -15,6 +15,7 @@ import { formatDate } from '../../../dateUtils';
 import ViewControl from '../../../components/ViewControl';
 import { TableFilter } from '../../../components/TableFilter';
 import { ExportImportMenu } from '../../../components/ExportImportMenu';
+import { parseCSVLine, openWhatsAppShare, findExistingLitigationRecord } from '../../../services/litigationImportHelper';
 
 type DueDateFilter = 'All' | 'gt15' | 'gt5' | 'urgent';
 
@@ -260,7 +261,7 @@ export const NoticePending: React.FC = () => {
 
       for (const row of rows) {
         if (!row.trim()) continue;
-        const cols = row.split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+        const cols = parseCSVLine(row);
         if (!cols[0]) continue;
 
         const tradeName = cols[0];
@@ -277,8 +278,11 @@ export const NoticePending: React.FC = () => {
           (c.tradeName && c.tradeName.toLowerCase() === tradeName.toLowerCase())
         );
 
+        const existingRecord = findExistingLitigationRecord(allRecords, referenceNo);
+
         const newRecord: Partial<LitigationRecord> = {
-          clientId: client?.id || 'CLIENT-' + Math.random().toString(36).substr(2, 9),
+          ...(existingRecord ? { id: existingRecord.id } : {}),
+          clientId: client?.id || existingRecord?.clientId || ('CLIENT-' + Math.random().toString(36).substr(2, 9)),
           clientName: tradeName,
           category: 'Notice',
           status: 'Pending',
@@ -318,7 +322,7 @@ export const NoticePending: React.FC = () => {
       `Status: Pending Reply\n\n` +
       `Please provide the required reply submissions at the earliest.`;
     
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+    openWhatsAppShare(message, client?.mobile);
   };
 
   if (isLoading) return <Loader />;
