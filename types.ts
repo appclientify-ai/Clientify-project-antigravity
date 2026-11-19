@@ -42,6 +42,14 @@ export type GstFilingFreq = 'Monthly' | 'Quarterly';
 export type ConstitutionType = 'Proprietorship' | 'Partnership' | 'HUF' | 'Company' | 'Trust' | 'Society' | 'Other';
 export type JurisdictionType = 'Center' | 'State';
 
+export interface GSTFilingHistoryEntry {
+  id?: string;
+  regType: GstRegType;      // 'Regular' | 'Composition'
+  filingFreq: GstFilingFreq; // 'Monthly' | 'Quarterly'
+  startDate: string;        // YYYY-MM-DD
+  endDate?: string;         // YYYY-MM-DD (empty/undefined means current / ongoing)
+}
+
 export interface Stakeholder {
   id: string;
   name: string;
@@ -79,6 +87,8 @@ export interface GSTProfile {
   gstCertificate?: string;
   gstCertificateName?: string;
   dob?: string;
+  doi?: string;
+  filingHistory?: GSTFilingHistoryEntry[];
 }
 
 export type NatureOfWork = 'Salaried' | 'Business' | 'Profession' | 'House Property' | 'Capital Gain' | 'Others';
@@ -121,6 +131,7 @@ export interface Client {
   pan?: string;
   address?: string; // Client address
   dob?: string;
+  doi?: string;
   status: ClientStatus;
   gstProfile?: GSTProfile;
   itProfile?: ITProfile;
@@ -128,6 +139,7 @@ export interface Client {
   remarks?: string;
   createdAt: number;
   services?: string[];
+  filingHistory?: GSTFilingHistoryEntry[];
 }
 
 export interface InvoiceLineItem {

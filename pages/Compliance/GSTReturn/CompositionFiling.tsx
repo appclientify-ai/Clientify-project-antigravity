@@ -18,7 +18,7 @@ import { TableFilter } from '../../../components/TableFilter';
 import { SectorJurisdictionFilter, filterClientsBySectorJurisdiction } from '../../../components/SectorJurisdictionFilter';
 import { useCompositionFilingLogic } from './filinglogic/CompositionFilingLogic';
 import { EditableRemark } from '../../../components/EditableRemark';
-import { getDefaultPeriod, YEARS, QUARTERS, isClientVisibleInPeriod, isClientVisibleInFY, getStatusLabel } from './filinglogic/MonthlyFilingLogic';
+import { getDefaultPeriod, YEARS, QUARTERS, isClientVisibleInPeriod, isClientVisibleInFY, getClientSchemeForPeriod, hasClientSchemeInFY, getStatusLabel } from './filinglogic/MonthlyFilingLogic';
 import { ExportMenu } from '../../../components/ExportMenu';
 import { CustomSelect } from '../../../components/CustomSelect';
 
@@ -72,7 +72,7 @@ const CompositionFiling: React.FC = () => {
   const [isCmp08FilterOpen, setIsCmp08FilterOpen] = useState(false);
   const [selectedYear, setSelectedYear] = useState(defaultPeriod.quarterYear);
   const [selectedQuarter, setSelectedQuarter] = useState(defaultPeriod.quarter);
-  
+
   const { getGlobalDueDate } = useGlobalDueDates(selectedYear);
   const cmp08DueDate = getGlobalDueDate('composition_cmp08', selectedQuarter);
 
@@ -90,7 +90,7 @@ const CompositionFiling: React.FC = () => {
   const [editingPasswordId, setEditingPasswordId] = useState<string | null>(null);
   const [newPassVal, setNewPassVal] = useState('');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  
+
   const [activeActionsId, setActiveActionsId] = useState<string | null>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -124,9 +124,9 @@ const CompositionFiling: React.FC = () => {
   }, [selectedQuarter]);
 
   const { getStatus, toggleStatus, updateRemark, updateDueDate, getDueDate } = useCompositionFilingLogic(
-    selectedYear, 
-    selectedQuarter, 
-    pageData?.filingData, 
+    selectedYear,
+    selectedQuarter,
+    pageData?.filingData,
     pageData?.dueDates
   );
 
@@ -180,12 +180,19 @@ const CompositionFiling: React.FC = () => {
 
   const baseClients = useMemo(() => {
     const s = search.toLowerCase();
-    let list = clients.filter(c => 
-      (isAllQuartersMode ? isClientVisibleInFY(c, selectedYear) : isClientVisibleInPeriod(c, selectedYear, quarterEndMonth)) &&
-      ((c.legalName || '').toLowerCase().includes(s) || 
-       (c.tradeName || '').toLowerCase().includes(s) ||
-       (c.gstProfile?.gstin || '').toLowerCase().includes(s))
-    );
+    let list = clients.filter(c => {
+      const isPeriodApplicable = isAllQuartersMode
+        ? (isClientVisibleInFY(c, selectedYear) && hasClientSchemeInFY(c, selectedYear, 'Composition'))
+        : (isClientVisibleInPeriod(c, selectedYear, quarterEndMonth) && (() => {
+          const sc = getClientSchemeForPeriod(c, selectedYear, quarterEndMonth);
+          return sc.regType === 'Composition';
+        })());
+
+      return isPeriodApplicable &&
+        ((c.legalName || '').toLowerCase().includes(s) ||
+          (c.tradeName || '').toLowerCase().includes(s) ||
+          (c.gstProfile?.gstin || '').toLowerCase().includes(s));
+    });
     if (isAllQuartersMode) {
       if (cmp08Filter === 'Filed') {
         list = list.filter(c => QUARTERS.every(q => getStatusLabel(getStatus(c.id, `${selectedYear}_${q}`).cmp08) === 'Filed'));
@@ -251,7 +258,7 @@ const CompositionFiling: React.FC = () => {
   const currentFilterOption = useMemo(() => {
     return filterOptions.find(o => o.value === quickFilter) || filterOptions[0];
   }, [filterOptions, quickFilter]);
-  
+
   const handleRefreshClients = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['composition_filing_page_data'] });
     queryClient.invalidateQueries({ queryKey: ['clients'] });
@@ -266,7 +273,7 @@ const CompositionFiling: React.FC = () => {
       setEditingPasswordId(null);
     } catch (err) { toast.error("Update failed."); }
   };
-    const groupedClients = useMemo(() => {
+  const groupedClients = useMemo(() => {
     const groups: Record<string, typeof filteredClients> = {};
     filteredClients.forEach(c => {
       const sector = getSectorGroupLabel(c);
@@ -274,9 +281,9 @@ const CompositionFiling: React.FC = () => {
       groups[sector].push(c);
     });
     const sortedKeys = Object.keys(groups).sort((a, b) => {
-       if (a.startsWith('Uncategorized')) return 1;
-       if (b.startsWith('Uncategorized')) return -1;
-       return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+      if (a.startsWith('Uncategorized')) return 1;
+      if (b.startsWith('Uncategorized')) return -1;
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     });
     return sortedKeys.map(k => ({ sector: k, clients: groups[k].sort((c1, c2) => (c1.tradeName || '').localeCompare(c2.tradeName || '')) }));
   }, [filteredClients]);
@@ -348,27 +355,27 @@ const CompositionFiling: React.FC = () => {
 
   return (
     <div className="w-full max-w-full min-w-0 flex flex-col h-full space-y-2 pb-1 overflow-hidden animate-in fade-in duration-300">
-      
+
       {/* Modern Unified Single-Line Toolbar */}
       <div className="relative z-50 flex items-center justify-between gap-1.5 sm:gap-2 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs shrink-0 w-full max-w-full min-w-0 flex-nowrap overflow-visible transition-colors">
-        
+
         {/* Left Section: Search Bar + Count Dropdown + Due Dates */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0 flex-nowrap">
           {/* Search Bar - Expanded to full available space */}
           <div className="relative group flex-1 min-w-[180px] sm:min-w-[240px]">
-            <input 
+            <input
               ref={searchInputRef}
-              type="text" 
-              placeholder="Search trade name, legal name, GSTIN..." 
-              value={search} 
+              type="text"
+              placeholder="Search trade name, legal name, GSTIN..."
+              value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full h-9 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-8 pr-7 sm:pr-14 text-xs font-semibold text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all outline-none" 
+              className="w-full h-9 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-8 pr-7 sm:pr-14 text-xs font-semibold text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all outline-none"
             />
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 group-focus-within:text-slate-600 dark:group-focus-within:text-slate-300 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             {search ? (
-              <button 
+              <button
                 type="button"
                 onClick={() => setSearch('')}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded cursor-pointer"
@@ -387,30 +394,28 @@ const CompositionFiling: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
-              className={`h-9 px-2.5 rounded-lg border text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap ${
-                isFilterDropdownOpen
+              className={`h-9 px-2.5 rounded-lg border text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95 whitespace-nowrap ${isFilterDropdownOpen
                   ? 'bg-slate-900 text-white dark:bg-indigo-600 border-slate-900 dark:border-indigo-600'
                   : quickFilter !== 'All'
                     ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900'
                     : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750'
-              }`}
+                }`}
               title="Click to view all status counts and filters"
             >
               <span className={`h-2 w-2 rounded-full ${currentFilterOption.dot} shrink-0`} />
               <span>{currentFilterOption.shortLabel}</span>
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold leading-none ${
-                isFilterDropdownOpen
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold leading-none ${isFilterDropdownOpen
                   ? 'bg-slate-800 dark:bg-indigo-700 text-white'
                   : quickFilter !== 'All'
                     ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-100'
                     : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
-              }`}>
+                }`}>
                 {currentFilterOption.count}
               </span>
-              <svg 
-                className={`h-3 w-3 text-slate-400 transition-transform duration-200 ${isFilterDropdownOpen ? 'rotate-180 text-white' : ''}`} 
-                fill="none" 
-                viewBox="0 0 24 24" 
+              <svg
+                className={`h-3 w-3 text-slate-400 transition-transform duration-200 ${isFilterDropdownOpen ? 'rotate-180 text-white' : ''}`}
+                fill="none"
+                viewBox="0 0 24 24"
                 stroke="currentColor"
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
@@ -435,21 +440,19 @@ const CompositionFiling: React.FC = () => {
                           setQuickFilter(option.value as any);
                           setIsFilterDropdownOpen(false);
                         }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                          isSelected
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${isSelected
                             ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold'
                             : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2">
                           <span className={`h-2 w-2 rounded-full ${option.dot} shrink-0`} />
                           <span>{option.label}</span>
                         </div>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          isSelected
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${isSelected
                             ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-100'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                        }`}>
+                          }`}>
                           {option.count}
                         </span>
                       </button>
@@ -475,9 +478,9 @@ const CompositionFiling: React.FC = () => {
 
         {/* Right Section: ViewControl + SectorFilter + Print + Import/Export + Year/Quarter */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto flex-nowrap overflow-visible">
-          <ViewControl 
-            viewMode={viewMode} 
-            onViewChange={setViewMode} 
+          <ViewControl
+            viewMode={viewMode}
+            onViewChange={setViewMode}
             className="h-9 rounded-lg shrink-0"
           />
 
@@ -496,20 +499,20 @@ const CompositionFiling: React.FC = () => {
           <ExportMenu onExportCSV={handleExportCSV} onExportPDF={handlePrint} />
 
           {/* Year Selector */}
-          <CustomSelect 
-            value={selectedYear} 
-            onChange={setSelectedYear} 
-            options={YEARS} 
+          <CustomSelect
+            value={selectedYear}
+            onChange={setSelectedYear}
+            options={YEARS}
             labelPrefix="FY "
             title="Select Financial Year"
             align="right"
           />
 
           {/* Quarter Selector */}
-          <CustomSelect 
-            value={selectedQuarter} 
-            onChange={setSelectedQuarter} 
-            options={QUARTER_SELECT_OPTIONS} 
+          <CustomSelect
+            value={selectedQuarter}
+            onChange={setSelectedQuarter}
+            options={QUARTER_SELECT_OPTIONS}
             title="Select Filing Quarter"
             align="right"
             menuWidth="min-w-[170px]"
@@ -549,31 +552,31 @@ const CompositionFiling: React.FC = () => {
                         <span className="font-bold text-[10px] text-slate-400 uppercase">PWD:</span>
                         <div className="flex items-center gap-1">
                           {editingPasswordId === client.id ? (
-                            <input 
-                              autoFocus 
-                              value={newPassVal} 
-                              onChange={e => setNewPassVal(e.target.value)} 
-                              onBlur={handleUpdatePassword} 
-                              onKeyDown={e => e.key === 'Enter' && handleUpdatePassword()} 
-                              className="bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded px-1.5 py-0.5 text-xs font-mono w-20 outline-none h-6" 
+                            <input
+                              autoFocus
+                              value={newPassVal}
+                              onChange={e => setNewPassVal(e.target.value)}
+                              onBlur={handleUpdatePassword}
+                              onKeyDown={e => e.key === 'Enter' && handleUpdatePassword()}
+                              className="bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded px-1.5 py-0.5 text-xs font-mono w-20 outline-none h-6"
                             />
                           ) : (
                             <>
                               <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">{client.gstProfile?.password || '---'}</span>
-                              <button 
-                                onClick={() => { setSelectedClient(client); setEditingPasswordId(client.id); setNewPassVal(client.gstProfile?.password || ''); }} 
+                              <button
+                                onClick={() => { setSelectedClient(client); setEditingPasswordId(client.id); setNewPassVal(client.gstProfile?.password || ''); }}
                                 className="p-0.5 text-slate-400 hover:text-amber-500 transition-all inline-flex cursor-pointer"
                                 title="Edit Password"
                               >
                                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                               </button>
                               {client.gstProfile?.username && (
-                                <button 
-                                  onClick={() => { 
-                                    navigator.clipboard.writeText(client.gstProfile?.username || ''); 
-                                    window.open('https://services.gst.gov.in/services/login', '_blank'); 
-                                  }} 
-                                  className="p-0.5 text-slate-400 hover:text-indigo-600 transition-all inline-flex cursor-pointer" 
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(client.gstProfile?.username || '');
+                                    window.open('https://services.gst.gov.in/services/login', '_blank');
+                                  }}
+                                  className="p-0.5 text-slate-400 hover:text-indigo-600 transition-all inline-flex cursor-pointer"
                                   title="Login to Portal"
                                 >
                                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -587,9 +590,8 @@ const CompositionFiling: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[11px]">
-                    <span className={`px-2 py-0.5 rounded-md font-medium ${
-                      statusLabel === 'Filed' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : statusLabel === 'Challan' ? 'bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
-                    }`}>
+                    <span className={`px-2 py-0.5 rounded-md font-medium ${statusLabel === 'Filed' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : statusLabel === 'Challan' ? 'bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+                      }`}>
                       CMP-08: {statusLabel}
                     </span>
                   </div>
@@ -612,221 +614,231 @@ const CompositionFiling: React.FC = () => {
             })}
           </div>
         ) : (
-        <div className="w-full overflow-x-auto overflow-y-auto no-scrollbar flex-1 relative h-full">
-          <table className={`w-full text-left border-collapse min-w-[1000px] composition-returns-table ${isAllQuartersMode ? 'min-w-[1250px]' : ''}`}>
-            <thead className="sticky top-0 z-30 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs font-semibold tracking-wider uppercase select-none">
-              <tr>
-                <th className="px-3 py-3 w-12 text-center whitespace-nowrap">S.No.</th>
-                <th className={`px-3 py-3 ${isAllQuartersMode ? 'w-[180px]' : 'min-w-[180px]'} whitespace-nowrap`}>Trade Name</th>
-                <th className={`px-3 py-3 ${isAllQuartersMode ? 'w-[120px]' : 'min-w-[120px]'} whitespace-nowrap`}>Mobile No.</th>
-                <th className={`px-3 py-3 ${isAllQuartersMode ? 'w-[145px]' : 'min-w-[145px]'} whitespace-nowrap`}>GSTIN</th>
-                
-                {isAllQuartersMode ? (
-                  QUARTERS.map(q => (
-                    <th key={q} className="px-1 py-1 text-center w-[125px] min-w-[125px] whitespace-nowrap">
-                      <div className="flex items-center justify-center gap-0.5">
-                        <TableFilter 
-                          label={SHORT_QUARTER_MAP[q] || q} 
-                          isActive={!!quarterFilters[q] && quarterFilters[q] !== 'All'}
-                        >
-                          {['All', 'Filed', 'Challan', 'Pending'].map(f => (
-                            <button 
-                              key={f} 
-                              onClick={() => setQuarterFilters(prev => ({ ...prev, [q]: f }))} 
-                              className="w-full text-left px-2.5 py-1.5 text-xs font-semibold rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
-                            >
-                              {f}
-                            </button>
-                          ))}
-                        </TableFilter>
-                      </div>
-                    </th>
-                  ))
-                ) : (
-                  <>
-                    <th className="px-3 py-3 text-center min-w-[120px] whitespace-nowrap">
-                       <div className="flex justify-center flex-col items-center">
-                         <TableFilter label="CMP-08" isActive={cmp08Filter !== 'All'}>
-                           {['All', 'Filed', 'Challan', 'Pending'].map(f => <button key={f} onClick={() => setCmp08Filter(f as any)} className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer">{f}</button>)}
-                         </TableFilter>
-                       </div>
-                    </th>
-                    <th className="px-3 py-3 min-w-[110px] whitespace-nowrap">User ID</th>
-                    <th className="px-3 py-3 min-w-[110px] whitespace-nowrap">Password</th>
-                    <th className="px-3 py-3 min-w-[130px]">Remark</th>
-                  </>
-                )}
+          <div className="w-full overflow-x-auto overflow-y-auto no-scrollbar flex-1 relative h-full">
+            <table className={`w-full text-left border-collapse min-w-[1000px] composition-returns-table ${isAllQuartersMode ? 'min-w-[1250px]' : ''}`}>
+              <thead className="sticky top-0 z-30 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs font-semibold tracking-wider uppercase select-none">
+                <tr>
+                  <th className="px-3 py-3 w-12 text-center whitespace-nowrap">S.No.</th>
+                  <th className={`px-3 py-3 ${isAllQuartersMode ? 'w-[180px]' : 'min-w-[180px]'} whitespace-nowrap`}>Trade Name</th>
+                  <th className={`px-3 py-3 ${isAllQuartersMode ? 'w-[120px]' : 'min-w-[120px]'} whitespace-nowrap`}>Mobile No.</th>
+                  <th className={`px-3 py-3 ${isAllQuartersMode ? 'w-[145px]' : 'min-w-[145px]'} whitespace-nowrap`}>GSTIN</th>
 
-                <th className="px-3 py-3 text-right sticky top-0 right-0 bg-slate-50 dark:bg-slate-800 z-40 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] min-w-[120px] whitespace-nowrap">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs font-sans">
-              {groupedClients.map(({ sector, clients: sectorClients }) => (
-                <React.Fragment key={sector}>
-                  <tr>
-                    <td colSpan={8} className="sticky top-[41px] z-20 bg-slate-100 dark:bg-slate-800 font-semibold text-xs text-slate-700 dark:text-slate-300 py-2 px-3 tracking-wider border-y border-slate-200 dark:border-slate-750 shadow-2xs">
-                      <div className="flex items-center gap-2 sticky left-3 max-w-fit">
-                        <svg className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                        </svg>
-                        <span className="uppercase text-[11px] font-bold text-slate-700 dark:text-slate-200">{sector}</span>
-                      </div>
-                    </td>
-                    <td className="sticky top-[41px] right-0 z-20 bg-slate-100 dark:bg-slate-800 py-2 px-3 text-right whitespace-nowrap min-w-[120px] border-y border-slate-200 dark:border-slate-750 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.04)]">
-                      <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold font-mono tabular-nums">
-                        {sectorClients.length} {sectorClients.length === 1 ? 'client' : 'clients'}
-                      </span>
-                    </td>
-                  </tr>
-                  {sectorClients.map((client, idx) => {
-                const st = getStatus(client.id);
-                const cmp08Status = getStatusLabel(st.cmp08);
-                const isEditingPass = editingPasswordId === client.id;
-                const theme = getClientColorTheme(client);
-                return (
-                  <tr key={client.id} className={`transition-colors duration-150 group border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50/70 dark:hover:bg-slate-800/50 ${theme.rowClass}`}>
-                    <td className="px-3 py-2.5 font-mono tabular-nums text-xs font-medium text-slate-400 dark:text-slate-500 w-12 text-center whitespace-nowrap">{(idx + 1).toString().padStart(2, '0')}</td>
-                    <td className={`px-3 py-2.5 ${isAllQuartersMode ? 'w-[180px]' : 'min-w-[180px]'}`} title={client.tradeName}>
-                      <p className="text-xs sm:text-sm font-semibold leading-normal truncate text-slate-900 dark:text-white" title={client.tradeName}>
-                        {client.tradeName || client.legalName || '---'}
-                      </p>
-                      <p className="text-[10px] text-slate-400 font-medium truncate" title={client.legalName}>
-                        {client.legalName || '---'}
-                      </p>
-                    </td>
-                    <td className={`px-3 py-2.5 font-mono tabular-nums text-xs font-medium text-slate-700 dark:text-slate-300 truncate whitespace-nowrap ${isAllQuartersMode ? 'w-[120px]' : 'min-w-[120px]'}`}>{client.mobile || '---'}</td>
-                    <td className={`px-3 py-2.5 whitespace-nowrap ${isAllQuartersMode ? 'w-[145px]' : 'min-w-[145px]'}`}>
-                      <div className="flex items-center gap-1.5 group/gstin whitespace-nowrap">
-                        <span className="tracking-wider uppercase text-xs font-semibold font-mono tabular-nums text-indigo-600 dark:text-indigo-400">{client.gstProfile?.gstin}</span>
-                        {client.gstProfile?.gstin && (
-                          <button 
-                            type="button"
-                            onClick={() => (navigator.clipboard.writeText(client.gstProfile?.gstin || '').then(() => { toast.success('GSTIN Copied!'); window.open('https://services.gst.gov.in/services/searchtp', '_blank'); }))} 
-                            className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded transition-colors cursor-pointer opacity-0 group-hover/gstin:opacity-100 shrink-0" 
-                            title="Search Taxpayer"
+                  {isAllQuartersMode ? (
+                    QUARTERS.map(q => (
+                      <th key={q} className="px-1 py-1 text-center w-[125px] min-w-[125px] whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-0.5">
+                          <TableFilter
+                            label={SHORT_QUARTER_MAP[q] || q}
+                            isActive={!!quarterFilters[q] && quarterFilters[q] !== 'All'}
                           >
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                          </button>
-                        )}
-                      </div>
-                    </td>
+                            {['All', 'Filed', 'Challan', 'Pending'].map(f => (
+                              <button
+                                key={f}
+                                onClick={() => setQuarterFilters(prev => ({ ...prev, [q]: f }))}
+                                className="w-full text-left px-2.5 py-1.5 text-xs font-semibold rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                              >
+                                {f}
+                              </button>
+                            ))}
+                          </TableFilter>
+                        </div>
+                      </th>
+                    ))
+                  ) : (
+                    <>
+                      <th className="px-3 py-3 text-center min-w-[120px] whitespace-nowrap">
+                        <div className="flex justify-center flex-col items-center">
+                          <TableFilter label="CMP-08" isActive={cmp08Filter !== 'All'}>
+                            {['All', 'Filed', 'Challan', 'Pending'].map(f => <button key={f} onClick={() => setCmp08Filter(f as any)} className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer">{f}</button>)}
+                          </TableFilter>
+                        </div>
+                      </th>
+                      <th className="px-3 py-3 min-w-[110px] whitespace-nowrap">User ID</th>
+                      <th className="px-3 py-3 min-w-[110px] whitespace-nowrap">Password</th>
+                      <th className="px-3 py-3 min-w-[130px]">Remark</th>
+                    </>
+                  )}
 
-                    {isAllQuartersMode ? (
-                      QUARTERS.map(q => {
-                        const targetKey = `${selectedYear}_${q}`;
-                        const qSt = getStatus(client.id, targetKey);
-                        const qStatusLabel = getStatusLabel(qSt.cmp08);
-                        return (
-                          <td key={q} className="px-1 py-1.5 text-center border-x border-slate-100/80 dark:border-slate-800/60 align-middle w-[125px] min-w-[125px] whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={() => toggleStatus(client.id, targetKey)}
-                              className={`w-full px-2 py-1 rounded text-[10px] font-medium tracking-tight border flex items-center justify-between gap-1 transition-all cursor-pointer shadow-2xs ${
-                                qStatusLabel === 'Filed' 
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 hover:bg-emerald-100/80' 
-                                  : qStatusLabel === 'Challan' 
-                                    ? 'bg-purple-50 text-purple-700 border-purple-200/80 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800/80 hover:bg-purple-100/80' 
-                                    : 'bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80 hover:bg-amber-100/80'
-                              }`}
-                              title={`CMP-08 (${q}): Click to cycle (Pending → Challan → Filed)`}
-                            >
-                              <span className="text-[9px] font-semibold opacity-70">CMP</span>
-                              <span className="truncate">{qStatusLabel === 'Filed' ? 'Filed' : qStatusLabel === 'Challan' ? 'Chal' : 'Pend'}</span>
-                            </button>
+                  <th className="px-3 py-3 text-right sticky top-0 right-0 bg-slate-50 dark:bg-slate-800 z-40 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] min-w-[120px] whitespace-nowrap">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs font-sans">
+                {groupedClients.map(({ sector, clients: sectorClients }) => (
+                  <React.Fragment key={sector}>
+                    <tr>
+                      <td colSpan={8} className="sticky top-[41px] z-20 bg-slate-100 dark:bg-slate-800 font-semibold text-xs text-slate-700 dark:text-slate-300 py-2 px-3 tracking-wider border-y border-slate-200 dark:border-slate-750 shadow-2xs">
+                        <div className="flex items-center gap-2 sticky left-3 max-w-fit">
+                          <svg className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                          </svg>
+                          <span className="uppercase text-[11px] font-bold text-slate-700 dark:text-slate-200">{sector}</span>
+                        </div>
+                      </td>
+                      <td className="sticky top-[41px] right-0 z-20 bg-slate-100 dark:bg-slate-800 py-2 px-3 text-right whitespace-nowrap min-w-[120px] border-y border-slate-200 dark:border-slate-750 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.04)]">
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold font-mono tabular-nums">
+                          {sectorClients.length} {sectorClients.length === 1 ? 'client' : 'clients'}
+                        </span>
+                      </td>
+                    </tr>
+                    {sectorClients.map((client, idx) => {
+                      const st = getStatus(client.id);
+                      const cmp08Status = getStatusLabel(st.cmp08);
+                      const isEditingPass = editingPasswordId === client.id;
+                      const theme = getClientColorTheme(client);
+                      return (
+                        <tr key={client.id} className={`transition-colors duration-150 group border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50/70 dark:hover:bg-slate-800/50 ${theme.rowClass}`}>
+                          <td className="px-3 py-2.5 font-mono tabular-nums text-xs font-medium text-slate-400 dark:text-slate-500 w-12 text-center whitespace-nowrap">{(idx + 1).toString().padStart(2, '0')}</td>
+                          <td className={`px-3 py-2.5 ${isAllQuartersMode ? 'w-[180px]' : 'min-w-[180px]'}`} title={client.tradeName}>
+                            <p className="text-xs sm:text-sm font-semibold leading-normal truncate text-slate-900 dark:text-white" title={client.tradeName}>
+                              {client.tradeName || client.legalName || '---'}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-medium truncate" title={client.legalName}>
+                              {client.legalName || '---'}
+                            </p>
                           </td>
-                        );
-                      })
-                    ) : (
-                      <>
-                        <td className="px-3 py-2.5 text-center min-w-[120px] whitespace-nowrap">
-                          <button 
-                            type="button"
-                            onClick={() => toggleStatus(client.id)} 
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium tracking-tight border transition-all cursor-pointer active:scale-95 shadow-2xs ${
-                              cmp08Status === 'Filed' 
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 hover:bg-emerald-100/80' 
-                                : cmp08Status === 'Challan' 
-                                  ? 'bg-purple-50 text-purple-700 border-purple-200/80 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800/80 hover:bg-purple-100/80' 
-                                  : 'bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80 hover:bg-amber-100/80'
-                            }`} 
-                            title="Click to cycle: Pending → Challan → Filed"
-                          >
-                            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                              cmp08Status === 'Filed' ? 'bg-emerald-500' : cmp08Status === 'Challan' ? 'bg-purple-500' : 'bg-amber-500'
-                            }`} />
-                            <span>{cmp08Status}</span>
-                          </button>
-                        </td>
-                        <td className="px-3 py-2.5 font-mono tabular-nums text-xs font-medium text-slate-700 dark:text-slate-300 truncate min-w-[110px] whitespace-nowrap">{client.gstProfile?.username || '---'}</td>
-                        <td className="px-3 py-2.5 min-w-[115px] whitespace-nowrap">
-                           <div className="flex items-center gap-1.5 group/pass whitespace-nowrap">
-                              {isEditingPass ? (
-                                <input 
-                                  autoFocus 
-                                  value={newPassVal} 
-                                  onChange={e => setNewPassVal(e.target.value)} 
-                                  onBlur={handleUpdatePassword} 
-                                  onKeyDown={e => e.key === 'Enter' && handleUpdatePassword()} 
-                                  className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 h-7 text-xs font-mono w-24 outline-none text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500" 
-                                />
-                              ) : (
-                                <>
-                                   <span className="font-mono text-xs font-medium text-indigo-600 dark:text-indigo-400 truncate">{client.gstProfile?.password || '---'}</span>
-                                   <button 
-                                     type="button"
-                                     onClick={() => { setSelectedClient(client); setEditingPasswordId(client.id); setNewPassVal(client.gstProfile?.password || ''); }} 
-                                     className="p-1 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 opacity-0 group-hover/pass:opacity-100 transition-all shrink-0 cursor-pointer"
-                                     title="Edit Password"
-                                   >
-                                     <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                   </button>
-                                   {client.gstProfile?.username && (
-                                     <button 
-                                       type="button"
-                                       onClick={() => { 
-                                         navigator.clipboard.writeText(client.gstProfile?.username || ''); 
-                                         window.open('https://services.gst.gov.in/services/login', '_blank'); 
-                                       }} 
-                                       className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 opacity-0 group-hover/pass:opacity-100 transition-all shrink-0 cursor-pointer" 
-                                       title="Copy ID & Open GST Portal"
-                                     >
-                                       <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                                     </button>
-                                   )}
-                                </>
+                          <td className={`px-3 py-2.5 font-mono tabular-nums text-xs font-medium text-slate-700 dark:text-slate-300 truncate whitespace-nowrap ${isAllQuartersMode ? 'w-[120px]' : 'min-w-[120px]'}`}>{client.mobile || '---'}</td>
+                          <td className={`px-3 py-2.5 whitespace-nowrap ${isAllQuartersMode ? 'w-[145px]' : 'min-w-[145px]'}`}>
+                            <div className="flex items-center gap-1.5 group/gstin whitespace-nowrap">
+                              <span className="tracking-wider uppercase text-xs font-semibold font-mono tabular-nums text-indigo-600 dark:text-indigo-400">{client.gstProfile?.gstin}</span>
+                              {client.gstProfile?.gstin && (
+                                <button
+                                  type="button"
+                                  onClick={() => (navigator.clipboard.writeText(client.gstProfile?.gstin || '').then(() => { toast.success('GSTIN Copied!'); window.open('https://services.gst.gov.in/services/searchtp', '_blank'); }))}
+                                  className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded transition-colors cursor-pointer opacity-0 group-hover/gstin:opacity-100 shrink-0"
+                                  title="Search Taxpayer"
+                                >
+                                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                </button>
                               )}
-                           </div>
-                        </td>
-                        <td className="px-3 py-2.5 truncate max-w-[160px] min-w-[130px]">
-                           <EditableRemark value={st?.remark || getStatus?.(client.id)?.remark || ''} onSave={val => updateRemark(client.id, val)} />
-                        </td>
-                      </>
-                    )}
-                    <td className="px-3 py-2 text-right overflow-visible whitespace-nowrap min-w-[120px] sticky right-0 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-850 z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.04)]">
-                       <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                          <GSTViewIcon client={client} showLabel onDataChange={handleRefreshClients} />
-                          <button 
-                            type="button"
-                            onClick={(e) => openActionsMenu(e, client)} 
-                            className={`h-7 w-7 rounded-lg border transition-all flex items-center justify-center shadow-2xs cursor-pointer active:scale-95 ${
-                              activeActionsId === client.id 
-                                ? 'bg-slate-900 text-white dark:bg-indigo-600 border-slate-900 dark:border-indigo-600' 
-                                : 'bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                            }`}
-                            title="More Actions"
-                          >
-                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
-                          </button>
-                       </div>
-                    </td>
-                  </tr>
-                  );
-                })}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                            </div>
+                          </td>
+
+                          {isAllQuartersMode ? (
+                            QUARTERS.map(q => {
+                              const qEndMonth = q.includes('Q1') ? 'June' : q.includes('Q2') ? 'September' : q.includes('Q3') ? 'December' : 'March';
+                              const isApplicableForQuarter = isClientVisibleInPeriod(client, selectedYear, qEndMonth) && (() => {
+                                const sc = getClientSchemeForPeriod(client, selectedYear, qEndMonth);
+                                return sc.regType === 'Composition';
+                              })();
+
+                              if (!isApplicableForQuarter) {
+                                return (
+                                  <td key={q} className="px-1 py-1.5 text-center border-x border-slate-100/80 dark:border-slate-800/60 align-middle w-[125px] min-w-[125px] whitespace-nowrap">
+                                    <span className="text-xs text-slate-300 dark:text-slate-600 font-mono select-none" title={`Not Composition in ${q}`}>—</span>
+                                  </td>
+                                );
+                              }
+
+                              const targetKey = `${selectedYear}_${q}`;
+                              const qSt = getStatus(client.id, targetKey);
+                              const qStatusLabel = getStatusLabel(qSt.cmp08);
+                              return (
+                                <td key={q} className="px-1 py-1.5 text-center border-x border-slate-100/80 dark:border-slate-800/60 align-middle w-[125px] min-w-[125px] whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleStatus(client.id, targetKey)}
+                                    className={`w-full px-2 py-1 rounded text-[10px] font-medium tracking-tight border flex items-center justify-between gap-1 transition-all cursor-pointer shadow-2xs ${qStatusLabel === 'Filed'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 hover:bg-emerald-100/80'
+                                        : qStatusLabel === 'Challan'
+                                          ? 'bg-purple-50 text-purple-700 border-purple-200/80 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800/80 hover:bg-purple-100/80'
+                                          : 'bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80 hover:bg-amber-100/80'
+                                      }`}
+                                    title={`CMP-08 (${q}): Click to cycle (Pending → Challan → Filed)`}
+                                  >
+                                    <span className="text-[9px] font-semibold opacity-70">CMP</span>
+                                    <span className="truncate">{qStatusLabel === 'Filed' ? 'Filed' : qStatusLabel === 'Challan' ? 'Chal' : 'Pend'}</span>
+                                  </button>
+                                </td>
+                              );
+                            })
+                          ) : (
+                            <>
+                              <td className="px-3 py-2.5 text-center min-w-[120px] whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleStatus(client.id)}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium tracking-tight border transition-all cursor-pointer active:scale-95 shadow-2xs ${cmp08Status === 'Filed'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/80 hover:bg-emerald-100/80'
+                                      : cmp08Status === 'Challan'
+                                        ? 'bg-purple-50 text-purple-700 border-purple-200/80 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800/80 hover:bg-purple-100/80'
+                                        : 'bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/80 hover:bg-amber-100/80'
+                                    }`}
+                                  title="Click to cycle: Pending → Challan → Filed"
+                                >
+                                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${cmp08Status === 'Filed' ? 'bg-emerald-500' : cmp08Status === 'Challan' ? 'bg-purple-500' : 'bg-amber-500'
+                                    }`} />
+                                  <span>{cmp08Status}</span>
+                                </button>
+                              </td>
+                              <td className="px-3 py-2.5 font-mono tabular-nums text-xs font-medium text-slate-700 dark:text-slate-300 truncate min-w-[110px] whitespace-nowrap">{client.gstProfile?.username || '---'}</td>
+                              <td className="px-3 py-2.5 min-w-[115px] whitespace-nowrap">
+                                <div className="flex items-center gap-1.5 group/pass whitespace-nowrap">
+                                  {isEditingPass ? (
+                                    <input
+                                      autoFocus
+                                      value={newPassVal}
+                                      onChange={e => setNewPassVal(e.target.value)}
+                                      onBlur={handleUpdatePassword}
+                                      onKeyDown={e => e.key === 'Enter' && handleUpdatePassword()}
+                                      className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-2 h-7 text-xs font-mono w-24 outline-none text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                  ) : (
+                                    <>
+                                      <span className="font-mono text-xs font-medium text-indigo-600 dark:text-indigo-400 truncate">{client.gstProfile?.password || '---'}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => { setSelectedClient(client); setEditingPasswordId(client.id); setNewPassVal(client.gstProfile?.password || ''); }}
+                                        className="p-1 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 opacity-0 group-hover/pass:opacity-100 transition-all shrink-0 cursor-pointer"
+                                        title="Edit Password"
+                                      >
+                                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                      </button>
+                                      {client.gstProfile?.username && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(client.gstProfile?.username || '');
+                                            window.open('https://services.gst.gov.in/services/login', '_blank');
+                                          }}
+                                          className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 opacity-0 group-hover/pass:opacity-100 transition-all shrink-0 cursor-pointer"
+                                          title="Copy ID & Open GST Portal"
+                                        >
+                                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 truncate max-w-[160px] min-w-[130px]">
+                                <EditableRemark value={st?.remark || getStatus?.(client.id)?.remark || ''} onSave={val => updateRemark(client.id, val)} />
+                              </td>
+                            </>
+                          )}
+                          <td className="px-3 py-2 text-right overflow-visible whitespace-nowrap min-w-[120px] sticky right-0 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-850 z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.04)]">
+                            <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                              <GSTViewIcon client={client} showLabel onDataChange={handleRefreshClients} />
+                              <button
+                                type="button"
+                                onClick={(e) => openActionsMenu(e, client)}
+                                className={`h-7 w-7 rounded-lg border transition-all flex items-center justify-center shadow-2xs cursor-pointer active:scale-95 ${activeActionsId === client.id
+                                    ? 'bg-slate-900 text-white dark:bg-indigo-600 border-slate-900 dark:border-indigo-600'
+                                    : 'bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                                  }`}
+                                title="More Actions"
+                              >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -834,16 +846,16 @@ const CompositionFiling: React.FC = () => {
       {activeActionsId && selectedClient && typeof document !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[999998] flex items-center justify-end p-3 sm:p-6 pointer-events-none">
           {/* Dismiss Backdrop */}
-          <div 
+          <div
             className="fixed inset-0 bg-slate-950/20 backdrop-blur-[2px] pointer-events-auto animate-in fade-in duration-150"
             onClick={(e) => {
               e.stopPropagation();
               setActiveActionsId(null);
-            }} 
+            }}
           />
 
           {/* Action Options Panel in Right Side Center */}
-          <div 
+          <div
             ref={actionsRef}
             onClick={(e) => e.stopPropagation()}
             className="relative pointer-events-auto w-80 max-w-[calc(100vw-24px)] max-h-[calc(100vh-32px)] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl z-[999999] text-left animate-in fade-in slide-in-from-right-4 duration-200 ring-1 ring-black/5 dark:ring-white/10 overflow-hidden"
@@ -877,12 +889,12 @@ const CompositionFiling: React.FC = () => {
             {/* Scrollable Action Buttons */}
             <div className="overflow-y-auto p-2 space-y-1 no-scrollbar flex-1">
               {/* View Complete Profile Dossier */}
-              <button 
+              <button
                 type="button"
-                onClick={() => { 
-                  handleViewProfile(selectedClient!); 
-                  setActiveActionsId(null); 
-                }} 
+                onClick={() => {
+                  handleViewProfile(selectedClient!);
+                  setActiveActionsId(null);
+                }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-8 w-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:bg-white dark:group-hover:bg-slate-800 shadow-xs text-base font-bold shrink-0">
@@ -895,12 +907,12 @@ const CompositionFiling: React.FC = () => {
               </button>
 
               {/* Edit / Modify Client Form */}
-              <button 
+              <button
                 type="button"
-                onClick={() => { 
-                  setIsEditModalOpen(true); 
-                  setActiveActionsId(null); 
-                }} 
+                onClick={() => {
+                  setIsEditModalOpen(true);
+                  setActiveActionsId(null);
+                }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-indigo-50/70 dark:hover:bg-indigo-950/30 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-8 w-8 rounded-lg bg-indigo-50/80 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-base shrink-0">
@@ -915,12 +927,12 @@ const CompositionFiling: React.FC = () => {
               <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
 
               {/* View / Download Certificate Modal - REG-06 option */}
-              <button 
+              <button
                 type="button"
-                onClick={() => { 
-                  setIsCertModalOpen(true); 
-                  setActiveActionsId(null); 
-                }} 
+                onClick={() => {
+                  setIsCertModalOpen(true);
+                  setActiveActionsId(null);
+                }}
                 className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-indigo-50/70 dark:hover:bg-indigo-950/30 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-7 w-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-sm shrink-0">
@@ -941,9 +953,9 @@ const CompositionFiling: React.FC = () => {
               </div>
 
               {/* 1. GST Portal */}
-              <button 
+              <button
                 type="button"
-                onClick={() => { setLoginToolClient(selectedClient!); setLoginPortalType('gst'); setIsLoginBoxOpen(true); setActiveActionsId(null); }} 
+                onClick={() => { setLoginToolClient(selectedClient!); setLoginPortalType('gst'); setIsLoginBoxOpen(true); setActiveActionsId(null); }}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-7 w-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-xs shrink-0">🔐</div>
@@ -954,9 +966,9 @@ const CompositionFiling: React.FC = () => {
               </button>
 
               {/* 2. E-Way Bill */}
-              <button 
+              <button
                 type="button"
-                onClick={() => { setLoginToolClient(selectedClient!); setLoginPortalType('eway'); setIsLoginBoxOpen(true); setActiveActionsId(null); }} 
+                onClick={() => { setLoginToolClient(selectedClient!); setLoginPortalType('eway'); setIsLoginBoxOpen(true); setActiveActionsId(null); }}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-7 w-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 text-xs shrink-0">🚚</div>
@@ -967,9 +979,9 @@ const CompositionFiling: React.FC = () => {
               </button>
 
               {/* 3. GSTAT Portal */}
-              <button 
+              <button
                 type="button"
-                onClick={() => { setLoginToolClient(selectedClient!); setLoginPortalType('gstat'); setIsLoginBoxOpen(true); setActiveActionsId(null); }} 
+                onClick={() => { setLoginToolClient(selectedClient!); setLoginPortalType('gstat'); setIsLoginBoxOpen(true); setActiveActionsId(null); }}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-7 w-7 rounded-lg bg-amber-50 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 dark:text-amber-400 text-xs shrink-0">⚖️</div>
@@ -982,34 +994,34 @@ const CompositionFiling: React.FC = () => {
               <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
 
               {/* Share Credentials & Profile */}
-              <button 
+              <button
                 type="button"
                 onClick={() => {
                   setIsCredentialShareModalOpen(true);
                   setActiveActionsId(null);
-                }} 
+                }}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-7 w-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-xs shrink-0">🔑</div>
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">Share Login Credentials</span>
               </button>
 
-              <button 
+              <button
                 type="button"
-                onClick={() => { 
+                onClick={() => {
                   const fullText = `*Client Details*\nTrade Name: ${selectedClient!.tradeName || 'N/A'}\nLegal Name: ${selectedClient!.legalName || 'N/A'}\nMobile: ${selectedClient!.mobile || 'N/A'}\nEmail: ${selectedClient!.email || 'N/A'}\n\n*GST Details*\nGSTIN: ${selectedClient!.gstProfile?.gstin || 'N/A'}\nStatus: ${selectedClient!.gstProfile?.gstStatus || 'N/A'}\nReg Type: ${selectedClient!.gstProfile?.regType || 'N/A'}\nFiling: ${selectedClient!.gstProfile?.filingFreq || 'N/A'}\nReg Date: ${formatDate(selectedClient!.gstProfile?.regDate)}\nJurisdiction: ${selectedClient!.gstProfile?.jurisdictionType || 'N/A'}\nSector/Range: ${selectedClient!.gstProfile?.sector || selectedClient!.gstProfile?.range || 'N/A'}\n\n*Credentials*\nGST User ID: ${selectedClient!.gstProfile?.username || 'N/A'}\nGST Password: ${selectedClient!.gstProfile?.password || 'N/A'}\n\n*IT Details*\nPAN: ${selectedClient!.itProfile?.pan || 'N/A'}\nIT User ID: ${selectedClient!.itProfile?.username || 'N/A'}\nIT Password: ${selectedClient!.itProfile?.password || 'N/A'}`;
                   handleShareClick(fullText);
-                  setActiveActionsId(null); 
-                }} 
+                  setActiveActionsId(null);
+                }}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-7 w-7 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 text-xs shrink-0">📋</div>
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">Full Profile Summary</span>
               </button>
 
-              <button 
+              <button
                 type="button"
-                onClick={() => { 
+                onClick={() => {
                   const text = `*Entity Profile*\nTrade Name: ${selectedClient!.tradeName || 'N/A'}\nLegal Name: ${selectedClient!.legalName || 'N/A'}\nMobile: ${selectedClient!.mobile || 'N/A'}\nEmail: ${selectedClient!.email || 'N/A'}\n\n*GST Details*\nGSTIN: ${selectedClient!.gstProfile?.gstin || 'N/A'}\nStatus: ${selectedClient!.gstProfile?.gstStatus || 'N/A'}\nReg Type: ${selectedClient!.gstProfile?.regType || 'N/A'}\nFiling: ${selectedClient!.gstProfile?.filingFreq || 'N/A'}\nReg Date: ${formatDate(selectedClient!.gstProfile?.regDate)}\nJurisdiction: ${selectedClient!.gstProfile?.jurisdictionType || 'N/A'}\nSector/Range: ${selectedClient!.gstProfile?.sector || selectedClient!.gstProfile?.range || 'N/A'}\n\n*Credentials*\nGST User ID: ${selectedClient!.gstProfile?.username || 'N/A'}\nGST Password: ${selectedClient!.gstProfile?.password || 'N/A'}`;
                   const phone = String(selectedClient!.mobile || '').replace(/\D/g, '');
                   const cleanPhone = phone.length === 10 ? `91${phone}` : phone;
@@ -1017,8 +1029,8 @@ const CompositionFiling: React.FC = () => {
                     ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`
                     : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
                   window.open(url, '_blank');
-                  setActiveActionsId(null); 
-                }} 
+                  setActiveActionsId(null);
+                }}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-xl transition-colors text-left group cursor-pointer"
               >
                 <div className="h-7 w-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 text-xs shrink-0">💬</div>
@@ -1043,17 +1055,17 @@ const CompositionFiling: React.FC = () => {
               onChange={(e) => setSelectedNote(e.target.value)}
             />
             <div className="flex gap-2 overflow-x-auto no-scrollbar mb-5">
-               {(() => {
-                 try {
-                   const saved = localStorage.getItem('clientify_custom_templates');
-                   const templates = saved ? JSON.parse(saved) : [];
-                   return (templates || []).map((t: any, i: number) => (
-                     <button key={i} onClick={() => setSelectedNote(t.text)} className="shrink-0 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">{t.label}</button>
-                   ));
-                 } catch (e) {
-                   return null;
-                 }
-               })()}
+              {(() => {
+                try {
+                  const saved = localStorage.getItem('clientify_custom_templates');
+                  const templates = saved ? JSON.parse(saved) : [];
+                  return (templates || []).map((t: any, i: number) => (
+                    <button key={i} onClick={() => setSelectedNote(t.text)} className="shrink-0 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">{t.label}</button>
+                  ));
+                } catch (e) {
+                  return null;
+                }
+              })()}
             </div>
             <div className="flex gap-3">
               <button onClick={() => setIsShareModalOpen(false)} className="flex-1 py-2.5 text-slate-600 dark:text-slate-400 font-semibold text-xs border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer">Cancel</button>

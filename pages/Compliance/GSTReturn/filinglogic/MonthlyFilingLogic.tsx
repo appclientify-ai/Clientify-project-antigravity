@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Client } from '../../../../types';
+import { Client, GstRegType, GstFilingFreq } from '../../../../types';
 import { socketService } from '../../../../services/socket.ts';
 
 export interface FilingStatus {
@@ -98,11 +98,11 @@ export const periodToDate = (fy: string, monthName: string) => {
 /**
  * CORE LOGIC: Determines if a client should be shown in a specific filing period
  */
-export const isClientVisibleInPeriod = (client: Client, selectedYear: string, selectedMonth: string) => {
+export const isClientVisibleInPeriod = (client: Client, selectedYear: string, selectedMonth: string): boolean => {
   if (!client || !client.gstProfile) return false;
   
-  // 1. Client Status Check: Only show active clients in return pages (hide Inactive / Litigation)
-  if (client.status === 'Inactive' || client.status === 'Litigation') {
+  // 1. Client Status Check: Only show active clients in return pages (hide Inactive / Litigation / Suspended)
+  if (client.status !== 'Active' && client.status !== 'Active Filing') {
     return false;
   }
 
@@ -119,12 +119,14 @@ export const isClientVisibleInPeriod = (client: Client, selectedYear: string, se
 
   // 3. Check Cancellation / Suspension Date
   const status = client.gstProfile.gstStatus;
-  if (client.gstProfile.cancelDate && (status === 'Closed' || status === 'Cancelled' || status === 'Suspended')) {
+  if (client.gstProfile.cancelDate && client.gstProfile.cancelDate.trim() !== "") {
     const parsedCancel = parseDateString(client.gstProfile.cancelDate);
     if (parsedCancel) {
       const cancelMonthStart = new Date(parsedCancel.getFullYear(), parsedCancel.getMonth(), 1);
       if (periodDate > cancelMonthStart) return false;
     }
+  } else if (status === 'Closed' || status === 'Cancelled') {
+    return false;
   }
 
   return true;
@@ -133,11 +135,11 @@ export const isClientVisibleInPeriod = (client: Client, selectedYear: string, se
 /**
  * CORE LOGIC: For Annual Returns
  */
-export const isClientVisibleInFY = (client: Client, fy: string) => {
+export const isClientVisibleInFY = (client: Client, fy: string): boolean => {
   if (!client || !client.gstProfile) return false;
 
-  // 1. Client Status Check: Only show active clients in annual return pages (hide Inactive / Litigation)
-  if (client.status === 'Inactive' || client.status === 'Litigation') {
+  // 1. Client Status Check: Only show active clients in annual return pages (hide Inactive / Litigation / Suspended)
+  if (client.status !== 'Active' && client.status !== 'Active Filing') {
     return false;
   }
 
@@ -160,14 +162,85 @@ export const isClientVisibleInFY = (client: Client, fy: string) => {
 
   // 3. Check Cancellation / Suspension Date
   const status = client.gstProfile.gstStatus;
-  if (client.gstProfile.cancelDate && (status === 'Closed' || status === 'Cancelled' || status === 'Suspended')) {
+  if (client.gstProfile.cancelDate && client.gstProfile.cancelDate.trim() !== "") {
     const parsedCancel = parseDateString(client.gstProfile.cancelDate);
     if (parsedCancel) {
       if (parsedCancel < fyStart) return false;
     }
+  } else if (status === 'Closed' || status === 'Cancelled') {
+    return false;
   }
 
   return true;
+};
+
+export interface PeriodSchemeInfo {
+  regType: GstRegType;
+  filingFreq: GstFilingFreq;
+}
+
+/**
+ * CORE LOGIC: Determine the effective scheme and filing frequency for a client in a specific period
+ */
+export const getClientSchemeForPeriod = (
+  client: Client,
+  selectedYear: string,
+  selectedMonth: string
+): PeriodSchemeInfo => {
+  const defaultScheme: PeriodSchemeInfo = {
+    regType: client.gstProfile?.regType || 'Regular',
+    filingFreq: client.gstProfile?.filingFreq || 'Monthly'
+  };
+
+  const history = client.gstProfile?.filingHistory;
+  if (!history || !Array.isArray(history) || history.length === 0) {
+    return defaultScheme;
+  }
+
+  const periodDate = periodToDate(selectedYear, selectedMonth);
+
+  for (const entry of history) {
+    if (!entry.startDate || !entry.startDate.trim()) continue;
+    const start = parseDateString(entry.startDate);
+    if (!start) continue;
+
+    const startMonth = new Date(start.getFullYear(), start.getMonth(), 1);
+    let endMonth: Date | null = null;
+    if (entry.endDate && entry.endDate.trim() !== '') {
+      const end = parseDateString(entry.endDate);
+      if (end) {
+        endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      }
+    }
+
+    if (periodDate >= startMonth && (!endMonth || periodDate <= endMonth)) {
+      return {
+        regType: entry.regType,
+        filingFreq: entry.filingFreq
+      };
+    }
+  }
+
+  return defaultScheme;
+};
+
+/**
+ * Checks if a client was in a target scheme/frequency for ANY visible month in the FY
+ */
+export const hasClientSchemeInFY = (
+  client: Client,
+  fy: string,
+  targetRegType: GstRegType,
+  targetFilingFreq?: GstFilingFreq
+): boolean => {
+  if (!client || !client.gstProfile) return false;
+  return FY_MONTHS.some(m => {
+    if (!isClientVisibleInPeriod(client, fy, m)) return false;
+    const scheme = getClientSchemeForPeriod(client, fy, m);
+    if (scheme.regType !== targetRegType) return false;
+    if (targetFilingFreq && scheme.filingFreq !== targetFilingFreq) return false;
+    return true;
+  });
 };
 
 export const getDefaultPeriod = () => {

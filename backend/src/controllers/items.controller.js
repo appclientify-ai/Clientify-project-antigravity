@@ -408,7 +408,9 @@ export const getMonthlyFilingData = async (req, res) => {
         const gp = transformed.gstProfile || {};
         const regType = gp.regType || gp.registrationType || 'Regular';
         const filingFreq = gp.filingFreq || gp.filingFrequency || 'Monthly';
-        if (regType === 'Regular' && filingFreq === 'Monthly') {
+        const history = gp.filingHistory || [];
+        const matchesHistory = Array.isArray(history) && history.some(h => (h.regType === 'Regular' || !h.regType) && (h.filingFreq === 'Monthly' || !h.filingFreq));
+        if ((regType === 'Regular' && filingFreq === 'Monthly') || matchesHistory) {
           clients.push(transformed);
         }
       } else if (item.name === 'app_data_clientify_monthly_filing_v3') {
@@ -461,7 +463,9 @@ export const getQuarterlyFilingData = async (req, res) => {
         const gp = transformed.gstProfile || {};
         const regType = gp.regType || gp.registrationType || 'Regular';
         const filingFreq = gp.filingFreq || gp.filingFrequency;
-        if (regType === 'Regular' && filingFreq === 'Quarterly') {
+        const history = gp.filingHistory || [];
+        const matchesHistory = Array.isArray(history) && history.some(h => (h.regType === 'Regular' || !h.regType) && h.filingFreq === 'Quarterly');
+        if ((regType === 'Regular' && filingFreq === 'Quarterly') || matchesHistory) {
           clients.push(transformed);
         }
       } else if (item.name === 'app_data_clientify_quarterly_filing_v3') {
@@ -513,7 +517,9 @@ export const getCompositionFilingData = async (req, res) => {
       if (item.name === 'client') {
         const gp = transformed.gstProfile || {};
         const regType = gp.regType || gp.registrationType || gp.taxpayerType;
-        if (regType === 'Composition') {
+        const history = gp.filingHistory || [];
+        const matchesHistory = Array.isArray(history) && history.some(h => h.regType === 'Composition');
+        if (regType === 'Composition' || matchesHistory) {
           clients.push(transformed);
         }
       } else if (item.name === 'app_data_clientify_composition_filing_v3') {
@@ -567,7 +573,9 @@ export const getGSTR4FilingData = async (req, res) => {
       if (item.name === 'client') {
         const gp = transformed.gstProfile || {};
         const regType = gp.regType || gp.registrationType || gp.taxpayerType;
-        if (regType === 'Composition') {
+        const history = gp.filingHistory || [];
+        const matchesHistory = Array.isArray(history) && history.some(h => h.regType === 'Composition');
+        if (regType === 'Composition' || matchesHistory) {
           clients.push(transformed);
         }
       } else if (item.name === 'app_data_clientify_gstr4_filing_v1') {

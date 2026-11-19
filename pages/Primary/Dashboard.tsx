@@ -26,7 +26,7 @@ import CommandPalette from '../../components/CommandPalette.tsx';
 import GSTClientFormModal from '../Clientform/GSTClientFormModal.tsx';
 import ITClientFormModal from '../Clientform/ITClientFormModal.tsx';
 import LitigationGuidelinesModal from '../../components/LitigationGuidelinesModal';
-import { YEARS, FY_MONTHS, FY_QUARTERS, getDefaultPeriod, isClientVisibleInPeriod, periodToDate } from '../Compliance/GSTReturn/filinglogic/MonthlyFilingLogic';
+import { YEARS, FY_MONTHS, FY_QUARTERS, getDefaultPeriod, isClientVisibleInPeriod, getClientSchemeForPeriod, periodToDate } from '../Compliance/GSTReturn/filinglogic/MonthlyFilingLogic';
 import { formatDate } from '../../dateUtils.ts';
 
 // Lazy loading sub-pages
@@ -220,34 +220,31 @@ const Dashboard: React.FC = () => {
     const isFiled = (val: any) => val === true || val === 'Filed';
 
     if (type === 'monthly') {
-      const applicable = (clients || []).filter(c => c && c.gstProfile?.regType === 'Regular' && c.gstProfile?.filingFreq === 'Monthly' && isClientVisibleInPeriod(c, year, month));
+      const applicable = (clients || []).filter(c => {
+        if (!c || !isClientVisibleInPeriod(c, year, month)) return false;
+        const sc = getClientSchemeForPeriod(c, year, month);
+        return sc.regType === 'Regular' && sc.filingFreq === 'Monthly';
+      });
       total = applicable.length;
       r1 = applicable.filter(c => isFiled(periodData[c.id]?.r1)).length;
       r3b = applicable.filter(c => isFiled(periodData[c.id]?.r3b)).length;
       filed = r3b;
     } else if (type === 'quarterly') {
-      const checkQrmpVisibility = (c: Client) => {
-        if (!c || !c.gstProfile) return false;
-        const visibleInMonth = isClientVisibleInPeriod(c, year, month);
-        if (qrmpIsQuarterEnd) {
-          if (c.gstProfile.cancelDate && c.gstProfile.gstStatus === 'Closed') {
-            const cancelDate = new Date(c.gstProfile.cancelDate);
-            if (!isNaN(cancelDate.getTime())) {
-              const periodDate = periodToDate(year, month);
-              const lastVisibleMonthDate = new Date(cancelDate.getFullYear(), cancelDate.getMonth(), 1);
-              if (periodDate > lastVisibleMonthDate) return true;
-            }
-          }
-        }
-        return visibleInMonth;
-      };
-      const applicable = (clients || []).filter(c => c && c.gstProfile?.regType === 'Regular' && c.gstProfile?.filingFreq === 'Quarterly' && checkQrmpVisibility(c));
+      const applicable = (clients || []).filter(c => {
+        if (!c || !isClientVisibleInPeriod(c, year, month)) return false;
+        const sc = getClientSchemeForPeriod(c, year, month);
+        return sc.regType === 'Regular' && sc.filingFreq === 'Quarterly';
+      });
       total = applicable.length;
       r1 = applicable.filter(c => isFiled(periodData[c.id]?.r1)).length;
       r3b = applicable.filter(c => isFiled(periodData[c.id]?.r3b)).length;
       filed = r3b;
     } else if (type === 'composition') {
-      const applicable = (clients || []).filter(c => c && c.gstProfile?.regType === 'Composition' && isClientVisibleInPeriod(c, year, month));
+      const applicable = (clients || []).filter(c => {
+        if (!c || !isClientVisibleInPeriod(c, year, month)) return false;
+        const sc = getClientSchemeForPeriod(c, year, month);
+        return sc.regType === 'Composition';
+      });
       total = applicable.length;
       cmp08 = applicable.filter(c => isFiled(periodData[c.id]?.cmp08)).length;
       filed = cmp08;

@@ -15,7 +15,7 @@ import GSTDetailModal from '../../../components/GSTDetailModal';
 import { exportToCSV, printList, getSectorGroupLabel, getClientColorTheme } from '../../../exportUtils';
 import { TableFilter } from '../../../components/TableFilter';
 import { SectorJurisdictionFilter, filterClientsBySectorJurisdiction } from '../../../components/SectorJurisdictionFilter';
-import { useMonthlyFilingLogic, MONTHS, FY_MONTHS, YEARS, getDefaultPeriod, isClientVisibleInPeriod, isClientVisibleInFY, getStatusLabel } from './filinglogic/MonthlyFilingLogic';
+import { useMonthlyFilingLogic, MONTHS, FY_MONTHS, YEARS, getDefaultPeriod, isClientVisibleInPeriod, isClientVisibleInFY, getClientSchemeForPeriod, hasClientSchemeInFY, getStatusLabel } from './filinglogic/MonthlyFilingLogic';
 import { EditableRemark } from '../../../components/EditableRemark';
 import { toast } from 'sonner';
 import { useGlobalDueDates } from '../../../hooks/useGlobalDueDates';
@@ -166,12 +166,19 @@ const MonthlyFiling: React.FC = () => {
 
   const baseClients = useMemo(() => {
     const s = search.toLowerCase();
-    let list = clients.filter(c => 
-      (isAllMonthsMode ? isClientVisibleInFY(c, selectedYear) : isClientVisibleInPeriod(c, selectedYear, selectedMonth)) &&
-      ((c.legalName || '').toLowerCase().includes(s) || 
-       (c.tradeName || '').toLowerCase().includes(s) ||
-       (c.gstProfile?.gstin || '').toLowerCase().includes(s))
-    );
+    let list = clients.filter(c => {
+      const isPeriodApplicable = isAllMonthsMode 
+        ? (isClientVisibleInFY(c, selectedYear) && hasClientSchemeInFY(c, selectedYear, 'Regular', 'Monthly')) 
+        : (isClientVisibleInPeriod(c, selectedYear, selectedMonth) && (() => {
+            const sc = getClientSchemeForPeriod(c, selectedYear, selectedMonth);
+            return sc.regType === 'Regular' && sc.filingFreq === 'Monthly';
+          })());
+
+      return isPeriodApplicable &&
+        ((c.legalName || '').toLowerCase().includes(s) || 
+         (c.tradeName || '').toLowerCase().includes(s) ||
+         (c.gstProfile?.gstin || '').toLowerCase().includes(s));
+    });
 
     if (isAllMonthsMode) {
       if (r1Filter === 'Filed') {
@@ -786,6 +793,19 @@ const MonthlyFiling: React.FC = () => {
 
                     {isAllMonthsMode ? (
                       FY_MONTHS.map(m => {
+                        const isApplicableForMonth = isClientVisibleInPeriod(client, selectedYear, m) && (() => {
+                          const sc = getClientSchemeForPeriod(client, selectedYear, m);
+                          return sc.regType === 'Regular' && sc.filingFreq === 'Monthly';
+                        })();
+
+                        if (!isApplicableForMonth) {
+                          return (
+                            <td key={m} className="px-1 py-1 text-center border-x border-slate-100/60 dark:border-slate-800/60 align-middle w-[85px] min-w-[85px]">
+                              <span className="text-xs text-slate-300 dark:text-slate-600 font-mono select-none" title={`Not Regular Monthly in ${m}`}>—</span>
+                            </td>
+                          );
+                        }
+
                         const periodKey = `${selectedYear}_${m}`;
                         const monthSt = getStatus(client.id, periodKey);
                         const monthR3b = getStatusLabel(monthSt.r3b);

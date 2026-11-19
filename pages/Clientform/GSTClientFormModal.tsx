@@ -9,7 +9,8 @@ import {
   ClientStatus, 
   Stakeholder, 
   GstStatus, 
-  JurisdictionType 
+  JurisdictionType,
+  GSTFilingHistoryEntry 
 } from '../../types.ts';
 import { api } from '../../services/api.ts';
 import { toast } from 'sonner';
@@ -107,6 +108,17 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
     designation: ''
   });
 
+  const [transitionPrompt, setTransitionPrompt] = useState<{
+    isOpen: boolean;
+    type: 'scheme' | 'frequency';
+    prevRegType: GstRegType;
+    newRegType: GstRegType;
+    prevFilingFreq: GstFilingFreq;
+    newFilingFreq: GstFilingFreq;
+    prevEndDate: string;
+    newStartDate: string;
+  } | null>(null);
+
   const [formData, setFormData] = useState<Partial<Client>>({
     legalName: '',
     tradeName: '',
@@ -170,9 +182,12 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
         }
 
         const initialDob = initialData.dob || initialData.gstProfile?.dob || '';
+        const initialDoi = initialData.doi || initialData.gstProfile?.doi || '';
+        const initialHistory = initialData.gstProfile?.filingHistory || initialData.filingHistory || [];
         setFormData({
           ...initialData,
           dob: initialDob,
+          doi: initialDoi,
           gstProfile: {
             gstin: '',
             pan: '',
@@ -185,6 +200,8 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
             filingFreq: 'Monthly',
             constitution: 'Proprietorship',
             dob: initialDob,
+            doi: initialDoi,
+            filingHistory: initialHistory,
             accountantName: '',
             accountantMobile: '',
             address: '',
@@ -214,6 +231,7 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
       mobile: '',
       address: '',
       dob: '',
+      doi: '',
       status: 'Active',
       gstProfile: {
         gstin: '',
@@ -227,6 +245,8 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
         filingFreq: 'Monthly',
         constitution: 'Proprietorship',
         dob: '',
+        doi: '',
+        filingHistory: [],
         stakeholders: [createStakeholder()],
         accountantName: '',
         accountantMobile: '',
@@ -653,14 +673,189 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
   };
 
   const handleRegTypeChange = (type: GstRegType) => {
+    const curType = formData.gstProfile?.regType || 'Regular';
+    const curFreq = formData.gstProfile?.filingFreq || 'Monthly';
+    if (curType === type) return;
+
+    const newFreq: GstFilingFreq = type === 'Composition' ? 'Quarterly' : curFreq;
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const newStart = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
+    const prevEnd = new Date(currentYear, currentMonth, 0).toISOString().split('T')[0];
+
+    if (initialData || formData.gstProfile?.regDate || (formData.gstProfile?.filingHistory && formData.gstProfile.filingHistory.length > 0)) {
+      setTransitionPrompt({
+        isOpen: true,
+        type: 'scheme',
+        prevRegType: curType,
+        newRegType: type,
+        prevFilingFreq: curFreq,
+        newFilingFreq: newFreq,
+        prevEndDate: prevEnd,
+        newStartDate: newStart
+      });
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        gstProfile: {
+          ...prev.gstProfile!,
+          regType: type,
+          filingFreq: newFreq
+        }
+      }));
+    }
+  };
+
+  const handleFilingFreqChange = (freq: GstFilingFreq) => {
+    const curType = formData.gstProfile?.regType || 'Regular';
+    const curFreq = formData.gstProfile?.filingFreq || 'Monthly';
+    if (curFreq === freq) return;
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const newStart = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
+    const prevEnd = new Date(currentYear, currentMonth, 0).toISOString().split('T')[0];
+
+    if (initialData || formData.gstProfile?.regDate || (formData.gstProfile?.filingHistory && formData.gstProfile.filingHistory.length > 0)) {
+      setTransitionPrompt({
+        isOpen: true,
+        type: 'frequency',
+        prevRegType: curType,
+        newRegType: curType,
+        prevFilingFreq: curFreq,
+        newFilingFreq: freq,
+        prevEndDate: prevEnd,
+        newStartDate: newStart
+      });
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        gstProfile: {
+          ...prev.gstProfile!,
+          filingFreq: freq
+        }
+      }));
+    }
+  };
+
+  const applyTransition = () => {
+    if (!transitionPrompt) return;
+    const { prevRegType, newRegType, prevFilingFreq, newFilingFreq, prevEndDate, newStartDate } = transitionPrompt;
+
+    const existingHistory = formData.gstProfile?.filingHistory || [];
+    const prevStartDate = formData.gstProfile?.regDate || (existingHistory.length > 0 ? existingHistory[existingHistory.length - 1].startDate : '');
+
+    const updatedHistory: GSTFilingHistoryEntry[] = [...existingHistory];
+
+    const ongoingIdx = updatedHistory.findIndex(h => !h.endDate || h.endDate === '');
+    if (ongoingIdx >= 0) {
+      updatedHistory[ongoingIdx] = {
+        ...updatedHistory[ongoingIdx],
+        endDate: prevEndDate
+      };
+    } else if (prevStartDate) {
+      updatedHistory.push({
+        id: `hist_${Date.now()}_prev`,
+        regType: prevRegType,
+        filingFreq: prevFilingFreq,
+        startDate: prevStartDate,
+        endDate: prevEndDate
+      });
+    }
+
+    updatedHistory.push({
+      id: `hist_${Date.now()}_new`,
+      regType: newRegType,
+      filingFreq: newFilingFreq,
+      startDate: newStartDate,
+      endDate: ''
+    });
+
     setFormData(prev => ({
       ...prev,
       gstProfile: {
         ...prev.gstProfile!,
-        regType: type,
-        filingFreq: type === 'Composition' ? 'Quarterly' : prev.gstProfile?.filingFreq || 'Monthly'
+        regType: newRegType,
+        filingFreq: newFilingFreq,
+        filingHistory: updatedHistory
       }
     }));
+
+    toast.success(`Transition applied: ${newRegType} (${newFilingFreq}) effective ${newStartDate}`);
+    setTransitionPrompt(null);
+  };
+
+  const applyDirectSwitch = () => {
+    if (!transitionPrompt) return;
+    const { newRegType, newFilingFreq } = transitionPrompt;
+    setFormData(prev => ({
+      ...prev,
+      gstProfile: {
+        ...prev.gstProfile!,
+        regType: newRegType,
+        filingFreq: newFilingFreq
+      }
+    }));
+    setTransitionPrompt(null);
+  };
+
+  const cancelTransition = () => {
+    setTransitionPrompt(null);
+  };
+
+  const addHistoryEntry = () => {
+    const curType = formData.gstProfile?.regType || 'Regular';
+    const curFreq = formData.gstProfile?.filingFreq || 'Monthly';
+    const newEntry: GSTFilingHistoryEntry = {
+      id: `hist_${Date.now()}`,
+      regType: curType,
+      filingFreq: curFreq,
+      startDate: '',
+      endDate: ''
+    };
+    setFormData(prev => ({
+      ...prev,
+      gstProfile: {
+        ...prev.gstProfile!,
+        filingHistory: [...(prev.gstProfile?.filingHistory || []), newEntry]
+      }
+    }));
+  };
+
+  const updateHistoryEntry = (index: number, field: keyof GSTFilingHistoryEntry, value: any) => {
+    setFormData(prev => {
+      const history = [...(prev.gstProfile?.filingHistory || [])];
+      if (history[index]) {
+        history[index] = {
+          ...history[index],
+          [field]: value
+        };
+      }
+      return {
+        ...prev,
+        gstProfile: {
+          ...prev.gstProfile!,
+          filingHistory: history
+        }
+      };
+    });
+  };
+
+  const removeHistoryEntry = (index: number) => {
+    setFormData(prev => {
+      const history = [...(prev.gstProfile?.filingHistory || [])];
+      history.splice(index, 1);
+      return {
+        ...prev,
+        gstProfile: {
+          ...prev.gstProfile!,
+          filingHistory: history
+        }
+      };
+    });
   };
 
   const handleTabClick = (stepId: number) => {
@@ -780,6 +975,19 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
       }
     } else if (payload.gstProfile?.dob) {
       payload.dob = payload.gstProfile.dob;
+    }
+
+    if (formData.doi) {
+      payload.doi = formData.doi;
+      if (payload.gstProfile) {
+        payload.gstProfile.doi = formData.doi;
+      }
+    } else if (payload.gstProfile?.doi) {
+      payload.doi = payload.gstProfile.doi;
+    }
+
+    if (payload.gstProfile?.filingHistory) {
+      payload.filingHistory = payload.gstProfile.filingHistory;
     }
 
     if (constitution === 'Proprietorship') {
@@ -944,8 +1152,8 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                   <span>🏢</span> Business Information
                 </h3>
                 
-                {/* Row 1: Constitution, Trade Name, Legal Name */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {/* Row 1: Constitution, Trade Name, Legal Name, Client Status */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="flex flex-col justify-end space-y-1.5">
                     <div className="h-6 flex items-center justify-between">
                       <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate" title="Constitution of Business">
@@ -997,33 +1205,6 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                       value={formData.legalName || ''} 
                       onChange={e => handleLegalNameChange(e.target.value)} 
                       placeholder={formData.gstProfile?.constitution === 'Proprietorship' ? "e.g. Ramesh Kumar Sharma" : "e.g. Acme Enterprises LLP / Pvt Ltd"} 
-                    />
-                  </div>
-                </div>
-
-                {/* Row 2: Date of Birth / Incorporation & Client Status */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 gap-4 pt-1">
-                  <div className="flex flex-col justify-end space-y-1.5">
-                    <div className="h-6 flex items-center justify-between">
-                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate" title="Date of Birth / Incorporation Date">
-                        Date of Birth / Incorporation (DOB / DOI)
-                      </label>
-                    </div>
-                    <input 
-                      type="date"
-                      className="w-full h-10 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 uppercase outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" 
-                      value={formData.dob || formData.gstProfile?.dob || ''} 
-                      onChange={e => {
-                        const val = e.target.value;
-                        setFormData(prev => ({
-                          ...prev,
-                          dob: val,
-                          gstProfile: {
-                            ...prev.gstProfile!,
-                            dob: val
-                          }
-                        }));
-                      }} 
                     />
                   </div>
 
@@ -1240,7 +1421,7 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                       disabled={formData.gstProfile?.regType === 'Composition'} 
                       className="w-full h-10 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 disabled:opacity-50" 
                       value={formData.gstProfile?.filingFreq} 
-                      onChange={e => setFormData({...formData, gstProfile: {...formData.gstProfile!, filingFreq: e.target.value as GstFilingFreq}})}
+                      onChange={e => handleFilingFreqChange(e.target.value as GstFilingFreq)}
                     >
                       <option value="Monthly">Monthly</option>
                       <option value="Quarterly">Quarterly (QRMP)</option>
@@ -1330,6 +1511,103 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Filing Scheme & Frequency History (Timeline) */}
+              <div className="bg-slate-50/70 dark:bg-slate-800/40 rounded-2xl border border-slate-200/70 dark:border-slate-700/60 p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                      <span>⏳</span> Scheme & Filing Frequency History (Timeline)
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Controls which return pages (Monthly, Quarterly, or Composition) this client appears in for each time period.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addHistoryEntry}
+                    className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shadow-xs"
+                  >
+                    <span>+</span> Add Period
+                  </button>
+                </div>
+
+                {(!formData.gstProfile?.filingHistory || formData.gstProfile.filingHistory.length === 0) ? (
+                  <div className="bg-white/60 dark:bg-slate-900/40 rounded-xl p-3 border border-dashed border-slate-200 dark:border-slate-700 text-center">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Currently using active scheme ({formData.gstProfile?.regType || 'Regular'} - {formData.gstProfile?.filingFreq || 'Monthly'}) for all periods.
+                      Click <strong>+ Add Period</strong> or switch scheme above to record start & end transition dates.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {formData.gstProfile.filingHistory.map((entry, idx) => (
+                      <div 
+                        key={entry.id || idx}
+                        className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-750 flex flex-wrap items-center gap-3 shadow-2xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-[200px] flex-1">
+                          <select
+                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 outline-none"
+                            value={entry.regType}
+                            onChange={e => updateHistoryEntry(idx, 'regType', e.target.value as GstRegType)}
+                          >
+                            <option value="Regular">Regular</option>
+                            <option value="Composition">Composition</option>
+                          </select>
+
+                          <select
+                            disabled={entry.regType === 'Composition'}
+                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 outline-none disabled:opacity-50"
+                            value={entry.filingFreq}
+                            onChange={e => updateHistoryEntry(idx, 'filingFreq', e.target.value as GstFilingFreq)}
+                          >
+                            <option value="Monthly">Monthly</option>
+                            <option value="Quarterly">Quarterly</option>
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-500 font-medium">From:</span>
+                            <input
+                              type="date"
+                              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded-lg text-xs uppercase font-medium text-slate-900 dark:text-slate-100 outline-none"
+                              value={entry.startDate || ''}
+                              onChange={e => updateHistoryEntry(idx, 'startDate', e.target.value)}
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-500 font-medium">To:</span>
+                            <input
+                              type="date"
+                              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 rounded-lg text-xs uppercase font-medium text-slate-900 dark:text-slate-100 outline-none"
+                              value={entry.endDate || ''}
+                              placeholder="Ongoing"
+                              onChange={e => updateHistoryEntry(idx, 'endDate', e.target.value)}
+                            />
+                            {!entry.endDate && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 rounded border border-emerald-200 dark:border-emerald-800">
+                                Ongoing
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removeHistoryEntry(idx)}
+                            className="text-rose-500 hover:text-rose-700 text-xs font-bold px-2 py-1 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors ml-auto cursor-pointer"
+                            title="Remove timeline entry"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Form GST REG-06 Certificate Upload */}
@@ -1481,6 +1759,39 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                     )}
                   </div>
                 </div>
+
+                {formData.gstProfile?.constitution !== 'Proprietorship' && (
+                  <div className="bg-slate-50/80 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Date of Incorporation / Registration (DOI)
+                        </span>
+                        <span className="text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                          Entity DOI
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Official registration / incorporation date for this {formData.gstProfile?.constitution || 'entity'}.
+                      </p>
+                    </div>
+                    <div className="w-full sm:w-56">
+                      <input 
+                        type="date"
+                        className="w-full h-10 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 uppercase outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" 
+                        value={formData.doi || formData.gstProfile?.doi || ''} 
+                        onChange={e => {
+                          const val = e.target.value;
+                          setFormData(prev => ({
+                            ...prev,
+                            doi: val,
+                            gstProfile: prev.gstProfile ? { ...prev.gstProfile, doi: val } : undefined
+                          }));
+                        }} 
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-3">
                   {(!formData.gstProfile?.stakeholders || formData.gstProfile.stakeholders.length === 0) ? (
@@ -1817,6 +2128,84 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
             )}
           </div>
         </footer>
+
+        {/* Transition Prompt Dialog */}
+        {transitionPrompt?.isOpen && (
+          <div className="fixed inset-0 z-[9999999] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🔄</span>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                    {transitionPrompt.type === 'scheme' 
+                      ? `GST Scheme Transition: ${transitionPrompt.prevRegType} ➔ ${transitionPrompt.newRegType}`
+                      : `Filing Frequency Transition: ${transitionPrompt.prevFilingFreq} ➔ ${transitionPrompt.newFilingFreq}`}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Set start & end dates so past returns remain filed under the previous schedule and future returns appear under the new schedule.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl space-y-3 border border-slate-200/80 dark:border-slate-700/80">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    {transitionPrompt.type === 'scheme' 
+                      ? `Previous Scheme (${transitionPrompt.prevRegType}) End Date`
+                      : `Previous Frequency (${transitionPrompt.prevFilingFreq}) End Date`}
+                  </label>
+                  <input 
+                    type="date"
+                    className="w-full h-9 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 uppercase outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    value={transitionPrompt.prevEndDate}
+                    onChange={e => setTransitionPrompt(prev => prev ? { ...prev, prevEndDate: e.target.value } : null)}
+                  />
+                  <span className="text-[10px] text-slate-400">Last date of filing under the previous scheme/frequency.</span>
+                </div>
+
+                <div className="space-y-1 pt-1">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    {transitionPrompt.type === 'scheme' 
+                      ? `New Scheme (${transitionPrompt.newRegType}) Effective Start Date`
+                      : `New Frequency (${transitionPrompt.newFilingFreq}) Effective Start Date`}
+                  </label>
+                  <input 
+                    type="date"
+                    className="w-full h-9 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 uppercase outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    value={transitionPrompt.newStartDate}
+                    onChange={e => setTransitionPrompt(prev => prev ? { ...prev, newStartDate: e.target.value } : null)}
+                  />
+                  <span className="text-[10px] text-slate-400">From this date onwards, client will appear in the new return pages.</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={cancelTransition}
+                  className="w-full sm:w-auto px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={applyDirectSwitch}
+                  className="w-full sm:w-auto px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+                  title="Switch without keeping timeline history"
+                >
+                  Switch Without History
+                </button>
+                <button
+                  type="button"
+                  onClick={applyTransition}
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-sm cursor-pointer"
+                >
+                  Save Transition & Timeline
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

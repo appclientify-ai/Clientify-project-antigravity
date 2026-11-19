@@ -15,7 +15,7 @@ import GSTDetailModal from '../../../components/GSTDetailModal';
 import { exportToCSV, printList, getSectorGroupLabel, getClientColorTheme } from '../../../exportUtils';
 import { TableFilter } from '../../../components/TableFilter';
 import { SectorJurisdictionFilter, filterClientsBySectorJurisdiction } from '../../../components/SectorJurisdictionFilter';
-import { useMonthlyFilingLogic, MONTHS, YEARS, getDefaultPeriod, isClientVisibleInPeriod, isClientVisibleInFY, periodToDate, getStatusLabel } from './filinglogic/MonthlyFilingLogic';
+import { useMonthlyFilingLogic, MONTHS, YEARS, getDefaultPeriod, isClientVisibleInPeriod, isClientVisibleInFY, getClientSchemeForPeriod, hasClientSchemeInFY, periodToDate, getStatusLabel } from './filinglogic/MonthlyFilingLogic';
 import { ViewControl } from '../../../components/ViewControl';
 import { ExportMenu } from '../../../components/ExportMenu';
 import { CustomSelect } from '../../../components/CustomSelect';
@@ -213,10 +213,12 @@ const QuarterlyFiling: React.FC = () => {
   const checkQrmpVisibility = useCallback((c: Client) => {
     if (!c || !c.gstProfile) return false;
     if (isAllQuartersMode) {
-      return isClientVisibleInFY(c, selectedYear);
+      return isClientVisibleInFY(c, selectedYear) && hasClientSchemeInFY(c, selectedYear, 'Regular', 'Quarterly');
     }
     const targetMonth = activeQuarterConfig ? activeQuarterConfig.r3bMonth : 'June';
-    return isClientVisibleInPeriod(c, selectedYear, targetMonth);
+    if (!isClientVisibleInPeriod(c, selectedYear, targetMonth)) return false;
+    const sc = getClientSchemeForPeriod(c, selectedYear, targetMonth);
+    return sc.regType === 'Regular' && sc.filingFreq === 'Quarterly';
   }, [isAllQuartersMode, selectedYear, activeQuarterConfig]);
 
   const baseClients = useMemo(() => {
@@ -931,7 +933,21 @@ const QuarterlyFiling: React.FC = () => {
                     </td>
 
                     {isAllQuartersMode ? (
-                      QUARTER_CONFIGS.map(qConfig => (
+                      QUARTER_CONFIGS.map(qConfig => {
+                        const isApplicableForQuarter = isClientVisibleInPeriod(client, selectedYear, qConfig.r3bMonth) && (() => {
+                          const sc = getClientSchemeForPeriod(client, selectedYear, qConfig.r3bMonth);
+                          return sc.regType === 'Regular' && sc.filingFreq === 'Quarterly';
+                        })();
+
+                        if (!isApplicableForQuarter) {
+                          return (
+                            <td key={qConfig.key} className="px-1 py-1.5 text-center border-x border-slate-100/80 dark:border-slate-800/60 align-middle w-[135px] min-w-[135px]">
+                              <span className="text-xs text-slate-300 dark:text-slate-600 font-mono select-none" title={`Not Regular Quarterly in ${qConfig.label}`}>—</span>
+                            </td>
+                          );
+                        }
+
+                        return (
                         <td key={qConfig.key} className="px-1 py-1.5 text-center border-x border-slate-100/80 dark:border-slate-800/60 align-middle w-[135px] min-w-[135px]">
                           <div className="flex flex-col gap-1 text-[10px]">
                             <div className="grid grid-cols-3 gap-0.5">
@@ -979,7 +995,8 @@ const QuarterlyFiling: React.FC = () => {
                             })()}
                           </div>
                         </td>
-                      ))
+                      );
+                    })
                     ) : (
                       <>
                         <td className="px-3 py-2.5 text-center min-w-[210px] whitespace-nowrap">
