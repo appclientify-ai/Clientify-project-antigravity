@@ -159,16 +159,14 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
           const propName = initialData.legalName || first.name || initialData.tradeName || '';
           validStakeholders[0] = {
             ...first,
-            name: propName,
+            name: first.name || propName,
             pan: first.pan || initialData.gstProfile?.pan || '',
             mobile: first.mobile || initialData.mobile || '',
             email: first.email || initialData.email || '',
           };
-          initialData.legalName = propName;
-        } else if (constitution !== 'Proprietorship') {
-          const common = initialData.tradeName || initialData.legalName || '';
-          initialData.tradeName = common;
-          initialData.legalName = common;
+          if (!initialData.legalName) {
+            initialData.legalName = propName;
+          }
         }
 
         const initialDob = initialData.dob || initialData.gstProfile?.dob || '';
@@ -539,30 +537,17 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
     });
   };
 
-  // Trade Name change handler:
-  // If Proprietorship: Trade Name (Shop/Firm brand) is independent
-  // If other (Partnership, Company, HUF, etc.): Legal Name and Trade Name are identical
+  // Trade Name change handler: Trade Name (Shop/Firm brand) is independent across all constitutions
   const handleTradeNameChange = (val: string) => {
-    setFormData(prev => {
-      const constitution = prev.gstProfile?.constitution || 'Proprietorship';
-      if (constitution === 'Proprietorship') {
-        return {
-          ...prev,
-          tradeName: val
-        };
-      } else {
-        return {
-          ...prev,
-          tradeName: val,
-          legalName: val
-        };
-      }
-    });
+    setFormData(prev => ({
+      ...prev,
+      tradeName: val
+    }));
   };
 
   // Legal Name change handler:
   // If Proprietorship: Legal Name is the Proprietor's Name as per PAN (auto-syncs to Stakeholder 1)
-  // If other: Legal Name and Trade Name are identical (auto-syncs to Trade Name)
+  // If other (Partnership, LLP, Company, HUF, etc.): Legal Name updates independently without overriding Trade Name
   const handleLegalNameChange = (val: string) => {
     setFormData(prev => {
       const prevProfile = prev.gstProfile!;
@@ -584,13 +569,11 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
             stakeholders: curStakeholders
           }
         };
-      } else {
-        return {
-          ...prev,
-          legalName: val,
-          tradeName: val
-        };
       }
+      return {
+        ...prev,
+        legalName: val
+      };
     });
   };
 
@@ -655,12 +638,8 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
           mobile: curStakeholders[0].mobile || prev.mobile || '',
           email: curStakeholders[0].email || prev.email || '',
         };
-      } else {
-        // In Partnership, Company, HUF, Trust, Society: Trade Name and Legal Name are identical
-        const commonName = newTradeName || newLegalName || '';
-        newLegalName = commonName;
-        newTradeName = commonName;
       }
+      // In Partnership, LLP, Company, HUF, etc.: Keep newLegalName and newTradeName distinct without modifying them
 
       updatedProfile.stakeholders = curStakeholders;
 
@@ -810,9 +789,14 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
         payload.gstProfile.stakeholders[0].name = propName;
       }
     } else {
-      const common = payload.tradeName || payload.legalName || '';
-      payload.tradeName = common;
-      payload.legalName = common;
+      // In Partnership, LLP, Company, HUF, etc.: Trade Name and Legal Name can be different
+      // Accept them independently without overwriting one onto the other
+      if (!payload.tradeName?.trim() && payload.legalName?.trim()) {
+        payload.tradeName = payload.legalName.trim();
+      }
+      if (!payload.legalName?.trim() && payload.tradeName?.trim()) {
+        payload.legalName = payload.tradeName.trim();
+      }
     }
     
     saveMutation.mutate(payload);
@@ -986,34 +970,25 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                   <div className="flex flex-col justify-end space-y-1.5">
                     <div className="h-6 flex items-center justify-between">
                       <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate" title="Trade Name">
-                        Trade Name (Business Name) <span className="text-rose-500">*</span>
+                        Trade Name (Business / Brand Name) <span className="text-rose-500">*</span>
                       </label>
-                      {formData.gstProfile?.constitution !== 'Proprietorship' && (
-                        <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold shrink-0">
-                          = Legal Name
-                        </span>
-                      )}
                     </div>
                     <input 
                       className="w-full h-10 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all" 
                       value={formData.tradeName || ''} 
                       onChange={e => handleTradeNameChange(e.target.value)} 
-                      placeholder={formData.gstProfile?.constitution === 'Proprietorship' ? "e.g. Acme Traders" : "e.g. Acme Enterprises Pvt Ltd"} 
+                      placeholder={formData.gstProfile?.constitution === 'Proprietorship' ? "e.g. Acme Traders" : "e.g. Acme Solutions"} 
                     />
                   </div>
 
                   <div className="flex flex-col justify-end space-y-1.5">
                     <div className="h-6 flex items-center justify-between">
-                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate" title={formData.gstProfile?.constitution === 'Proprietorship' ? 'Legal Name (Proprietor Name)' : 'Legal Name (As per PAN)'}>
-                        {formData.gstProfile?.constitution === 'Proprietorship' ? 'Legal Name (Proprietor Name)' : 'Legal Name (As per PAN)'}
+                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate" title={formData.gstProfile?.constitution === 'Proprietorship' ? 'Legal Name (Proprietor Name)' : 'Legal Name (As per PAN / Registration)'}>
+                        {formData.gstProfile?.constitution === 'Proprietorship' ? 'Legal Name (Proprietor Name)' : 'Legal Name (As per PAN / Registration)'}
                       </label>
-                      {formData.gstProfile?.constitution === 'Proprietorship' ? (
+                      {formData.gstProfile?.constitution === 'Proprietorship' && (
                         <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold shrink-0">
                           = Proprietor
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold shrink-0">
-                          = Trade Name
                         </span>
                       )}
                     </div>
@@ -1021,7 +996,7 @@ const GSTClientFormModal: React.FC<GSTClientFormModalProps> = ({
                       className="w-full h-10 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all" 
                       value={formData.legalName || ''} 
                       onChange={e => handleLegalNameChange(e.target.value)} 
-                      placeholder={formData.gstProfile?.constitution === 'Proprietorship' ? "e.g. Ramesh Kumar Sharma" : "e.g. Acme Enterprises Pvt Ltd"} 
+                      placeholder={formData.gstProfile?.constitution === 'Proprietorship' ? "e.g. Ramesh Kumar Sharma" : "e.g. Acme Enterprises LLP / Pvt Ltd"} 
                     />
                   </div>
                 </div>
